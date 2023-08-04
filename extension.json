@@ -1,0 +1,13 @@
+{
+  "name": "saleae_lr11xx",
+  "apiVersion": "1.0.0",
+  "author": "Wayne Roberts",
+  "version": "0.9.0",
+  "description": "LR11xx SPI parser",
+  "extensions": {
+    "smtc_lr11xx": {
+      "type": "HighLevelAnalyzer",
+      "entryPoint": "HighLevelAnalyzer.Hla"
+    }
+  }
+}
