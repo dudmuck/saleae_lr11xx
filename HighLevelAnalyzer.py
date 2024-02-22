@@ -891,6 +891,10 @@ class Hla(HighLevelAnalyzer):
     def SetLoraSyncWord(self):
         return 'SetLoraSyncWord ' + hex(self.ba_mosi[2])
 
+    def GetLoRaRxHeaderInfos(self):
+        self.next_transfer_response = 1
+        return 'GetLoRaRxHeaderInfos (request) '
+
     def gnss_scan(self, label):
         time = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
         effort = self.ba_mosi[6]
@@ -970,6 +974,7 @@ class Hla(HighLevelAnalyzer):
         0x021b: SetLoRaSynchTimeout,
         0x0227: SetRxBoosted,
         0x022b: SetLoraSyncWord,
+        0x0230: GetLoRaRxHeaderInfos,
         0x0409: GnssAutonomous,
         0x040a: GnssAssisted,
         0x040c: GnssGetResultSize,
@@ -1041,6 +1046,15 @@ class Hla(HighLevelAnalyzer):
     def ResponseGetRssiInst(self):
         return 'GetRssiInst -' + str(self.ba_miso[1]/2) + 'dBm'
 
+    def ResponseGetLoRaRxHeaderInfos(self):
+        if self.ba_miso[1] & 0x10:
+            my_str = "CRC_ON"
+        else:
+            my_str = "CRC_OFF"
+        cr = self.ba_miso[1] & 0x07
+        my_str = my_str + ' ' + str(self.crs[cr]) + ' '
+        return 'GetLoRaRxHeaderInfos ' + my_str
+
     def ResponseGnssGetResultSize(self):
         return 'GetResultSize ' + str(int.from_bytes(bytearray(self.ba_miso[1:3]), 'big'))
 
@@ -1060,6 +1074,7 @@ class Hla(HighLevelAnalyzer):
         0x0203: ResponseGetRxBufferStatus,
         0x0204: ResponseGetPacketStatus,
         0x0205: ResponseGetRssiInst,
+        0x0230: ResponseGetLoRaRxHeaderInfos,
         0x040c: ResponseGnssGetResultSize,
         0x040d: ResponseGnssReadResults,
         0x0417: ResponseGnssGetNbSvDetected,
