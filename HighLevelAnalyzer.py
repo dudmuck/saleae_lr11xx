@@ -522,6 +522,10 @@ class Hla(HighLevelAnalyzer):
         data = int.from_bytes(bytearray(self.ba_mosi[10:14]), 'big')
         return 'WriteRegMemMask32 ' + hex(addr) + ', ' + hex(mask) + ', ' + hex(data)
 
+    def GetErrors(self):
+        self.next_transfer_response = 1
+        return 'GetErrors'
+
     def ClearErrors(self):
         return 'ClearErrors'
 
@@ -638,6 +642,15 @@ class Hla(HighLevelAnalyzer):
         else:
             my_str = '?' + hex(cfg) + '?'
         return 'SetStandby ' + my_str
+
+    def DriveDiosInSleepMode(self):
+        ena = self.ba_mosi[2]
+        _str = 'DriveDiosInSleepMode '
+        if ena:
+            _str = _str + 'pulled'
+        else:
+            _str = _str + 'floating'
+        return _str
 
     def SetCadParams(self):
         my_str = str(self.ba_mosi[2]) + ' symbols'
@@ -908,11 +921,69 @@ class Hla(HighLevelAnalyzer):
         nbSvMax = self.ba_mosi[8]
         return label + ' ' + str(time) + ' ' + estr + ' resultMask=' + hex(resultMask) + ' nbSvMax=' + str(nbSvMax)
 
+    def ResponseWifiReadResults(self):
+        return 'TODO ResponseWifiReadResults'
+
+    def WifiGetNbResults(self):
+        self.next_transfer_response = 1
+        return 'WifiGetNbResults'
+
+    def ResponseWifiGetNbResults(self):
+        return 'wifi NBresults:' + str(self.ba_miso[1])
+
+    def WifiReadResults(self):
+        _str = "index:" + str(self.ba_mosi[2])
+        _str = _str +  " NbResults:" + str(self.ba_mosi[3])
+        _format = self.ba_mosi[4]
+        _str = _str + ' format:'
+        if _format == 1:
+            _str = _str + "basic"
+        elif _format == 4:
+            _str = _str + "mac/type/ch"
+        else:
+            _str = _str + hex(_format)
+        self.next_transfer_response = 1
+        return 'WifiReadResults ' + _str
+
+    def ResponseWifiReadCumulTimings(self):
+        return 'TODO ResponseWifiReadCumulTimings'
+
+    def WifiReadCumulTimings(self):
+        self.next_transfer_response = 1
+        return 'WifiReadCumulTimings'
+
+    def WifiResetCumulTimings(self):
+        return 'WifiResetCumulTimings'
+
+    def GnssSetConstellationToUse(self):
+        bit_mask = self.ba_mosi[2]
+        _str = 'GnssSetConstellationToUse '
+        if bit_mask & 1:
+            _str = _str + 'GPS '
+        if bit_mask & 2:
+            _str = _str + 'BeiDou '
+        return _str
+
     def GnssAutonomous(self):
         return self.gnss_scan('GnssAutonomous')
 
     def GnssAssisted(self):
         return self.gnss_scan('GnssAssisted')
+
+    def GnssScan(self):
+        effort = self.ba_mosi[2]
+        resultMask = self.ba_mosi[3]
+        NbSvMax = self.ba_mosi[4]
+        _str = 'effort '
+        if effort == 0:
+            _str = _str + 'low'
+        elif effort == 1:
+            _str = _str + 'middle'
+        else:
+            _str = _str + hex(effort)
+        _str = _str + ' resultMask:' + hex(resultMask)
+        _str = _str + ' NbSvMax:' + str(NbSvMax)
+        return 'GnssScan ' + _str
 
     def GnssGetResultSize(self):
         self.next_transfer_response = 1
@@ -927,6 +998,14 @@ class Hla(HighLevelAnalyzer):
         lon = _lon / (2048/180)
         return 'GnssSetAssistancePosition ' + str(lat) + ', ' + str(lon)
 
+    def GnssReadAssistancePosition(self):
+        self.next_transfer_response = 1
+        return 'GnssReadAssistancePosition'
+
+    def GnssGetContextStatus(self):
+        self.next_transfer_response = 1
+        return 'GnssGetContextStatus'
+
     def GnssGetNbSvDetected(self):
         self.next_transfer_response = 1
         return 'GnssGetNbSvDetected'
@@ -934,6 +1013,41 @@ class Hla(HighLevelAnalyzer):
     def GnssGetSvDetected(self):
         self.next_transfer_response = 1
         return 'GnssGetSvDetected'
+
+    def GnssReadLastScanModeLaunched(self):
+        self.next_transfer_response = 1
+        return 'GnssReadLastScanModeLaunched'
+
+    def ResponseGnssReadTime(self):
+        errorCode = self.ba_miso[1]
+        _str = 'errorCode '
+        if errorCode == 0:
+            _str = _str + 'Tow is available'
+        elif errorCode == 1:
+            _str = _str + 'no 32KHz'
+        elif errorCode == 2:
+            _str = _str + 'time not available'
+        else:
+            _str = _str + hex(errorCode)
+        return 'TODO ResponseGnssReadTime ' + _str
+
+    def ResponseGnssReadCumulTiming(self):
+        return 'GnssReadCumulTiming response'
+
+    def ResponseGnssReadAlmanacStatus(self):
+        return 'ReadAlmanacStatus response'
+
+    def GnssReadTime(self):
+        self.next_transfer_response = 1
+        return 'GnssReadTime'
+
+    def GnssReadCumulTiming(self):
+        self.next_transfer_response = 1
+        return 'GnssReadCumulTiming'
+
+    def GnssReadAlmanacStatus(self):
+        self.next_transfer_response = 1
+        return 'GnssReadAlmanacStatus '
 
     def GnssReadResults(self):
         self.next_transfer_response = 1
@@ -945,6 +1059,7 @@ class Hla(HighLevelAnalyzer):
         0x0109: WriteBuffer8,
         0x010a: ReadBuffer8,
         0x010c: WriteRegMemMask32,
+        0x010d: GetErrors,
         0x010e: ClearErrors,
         0x010f: Calibrate,
         0x0110: SetRegMode,
@@ -956,6 +1071,7 @@ class Hla(HighLevelAnalyzer):
         0x0117: SetTcxoMode,
         0x011b: SetSleep,
         0x011c: SetStandby,
+        0x012a: DriveDiosInSleepMode,
         0x0203: GetRxBufferStatus,
         0x0204: GetPacketStatus,
         0x0205: GetRssiInst,
@@ -975,13 +1091,25 @@ class Hla(HighLevelAnalyzer):
         0x0227: SetRxBoosted,
         0x022b: SetLoraSyncWord,
         0x0230: GetLoRaRxHeaderInfos,
+        0x0305: WifiGetNbResults,
+        0x0306: WifiReadResults,
+        0x0307: WifiResetCumulTimings,
+        0x0308: WifiReadCumulTimings,
+        0x0400: GnssSetConstellationToUse,
         0x0409: GnssAutonomous,
         0x040a: GnssAssisted,
+        0x040b: GnssScan,
         0x040c: GnssGetResultSize,
         0x040d: GnssReadResults,
         0x0410: GnssSetAssistancePosition,
+        0x0411: GnssReadAssistancePosition,
+        0x0416: GnssGetContextStatus,
         0x0417: GnssGetNbSvDetected,
         0x0418: GnssGetSvDetected,
+        0x0426: GnssReadLastScanModeLaunched,
+        0x0434: GnssReadTime,
+        0x044a: GnssReadCumulTiming,
+        0x0457: GnssReadAlmanacStatus,
     }
 
     def ResponseGetVersion(self):
@@ -1002,6 +1130,29 @@ class Hla(HighLevelAnalyzer):
 
     def ResponseReadBuffer8(self):
         return 'ReadBuffer8 ' + str(len(self.ba_miso)-1) + 'bytes'
+
+    def ResponseGetErrors(self):
+        errorStat = int.from_bytes(bytearray(self.ba_miso[1:2]), 'big')
+        _str = ''
+        if errorStat & 1:
+            _str = _str + 'LF_RC_CALIB_ERR '
+        if errorStat & 2:
+            _str = _str + 'HF_RC_CALIB_ERR '
+        if errorStat & 4:
+            _str = _str + 'ADC_CALIB_ERR '
+        if errorStat & 8:
+            _str = _str + 'PLL_CALIB_ERR '
+        if errorStat & 0x10:
+            _str = _str + 'IMG_CALIB_ERR '
+        if errorStat & 0x20:
+            _str = _str + 'HF_XOSC_START_ERR '
+        if errorStat & 0x40:
+            _str = _str + 'LF_XOSC_START_ERR '
+        if errorStat & 0x80:
+            _str = _str + 'PLL_LOCK_ERR '
+        if errorStat & 0x100:
+            _str = _str + 'RX_ADC_OFFSET_ERR '
+        return _str
 
     def ResponseGetRxBufferStatus(self):
         payLen = self.ba_miso[1]
@@ -1061,8 +1212,43 @@ class Hla(HighLevelAnalyzer):
     def ResponseGnssReadResults(self):
         return 'GnssReadResults '
 
+    def ResponseGnssReadAssistancePosition(self):
+        _lat = int.from_bytes(bytearray(self.ba_miso[1:3]), 'big')
+        lat = _lat / (2048/90)
+        _lon = int.from_bytes(bytearray(self.ba_miso[3:5]), 'big')
+        if _lon > 0x7fff:
+            _lon -= 0x10000
+        lon = _lon / (2048/180)
+        return 'assistance position ' + str(lat) + ', ' + str(lon)
+
+    def ResponseGnssGetContextStatus(self):
+        return 'TODO GnssGetContextStatus response'
+
     def ResponseGnssGetNbSvDetected(self):
         return 'GnssGetNbSvDetected ' + str(self.ba_miso[1])
+
+    def ResponseGnssReadLastScanModeLaunched(self):
+        lsm = self.ba_miso[1]
+        _str = 'last scan mode: '
+        if lsm == 3:
+            _str = _str + 'assisted'
+        elif lsm == 4:
+            _str = _str + 'cold start, no time'
+        elif lsm == 5:
+            _str = _str + 'cold start, with time'
+        elif lsm == 6:
+            _str = _str + 'fetchtime or 2d'
+        elif lsm == 7:
+            _str = _str + 'almanac update command, no save'
+        elif lsm == 8:
+            _str = _str + 'keep sync'
+        elif lsm == 9:
+            _str = _str + 'almanac update command, 1 saved'
+        elif lsm == 10:
+            _str = _str + 'almanac update command, 2 saved'
+        else:
+            _str = _str + '0x'+hex(lsm)
+        return _str
 
     def ResponseGnssGetSvDetected(self):
         return 'GnssGetSvDetected '
@@ -1071,14 +1257,24 @@ class Hla(HighLevelAnalyzer):
         0x0101: ResponseGetVersion,
         0x0106: ResponseReadRegMem32,
         0x010a: ResponseReadBuffer8,
+        0x010d: ResponseGetErrors,
         0x0203: ResponseGetRxBufferStatus,
         0x0204: ResponseGetPacketStatus,
         0x0205: ResponseGetRssiInst,
         0x0230: ResponseGetLoRaRxHeaderInfos,
+        0x0305: ResponseWifiGetNbResults,
+        0x0306: ResponseWifiReadResults,
+        0x0308: ResponseWifiReadCumulTimings,
         0x040c: ResponseGnssGetResultSize,
         0x040d: ResponseGnssReadResults,
+        0x0411: ResponseGnssReadAssistancePosition,
+        0x0416: ResponseGnssGetContextStatus,
         0x0417: ResponseGnssGetNbSvDetected,
         0x0418: ResponseGnssGetSvDetected,
+        0x0426: ResponseGnssReadLastScanModeLaunched,
+        0x0434: ResponseGnssReadTime,
+        0x044a: ResponseGnssReadCumulTiming,
+        0x0457: ResponseGnssReadAlmanacStatus,
     }
 
     result_types = {
@@ -1136,7 +1332,7 @@ class Hla(HighLevelAnalyzer):
 
                 if len(self.ba_mosi) > 1:
                     my_str = my_str + ' (' + self.parseStatus(half_status) + ')'
-                print('--> ', my_str)
+                #print('--> ', my_str)
             else:
                 my_str = 'wakeup ' + str(frame.end_time - self.nss_fall_time)
             return AnalyzerFrame('match', self.nss_fall_time, frame.end_time, {'string':my_str})
