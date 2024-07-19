@@ -257,19 +257,19 @@ class Hla(HighLevelAnalyzer):
         stat2 = Stat2()
         stat2.asByte = self.ba_miso[1]
         if stat2.resetStatus == 0:
-            resetStr = 'none'
+            resetStr = 'no-reset'
         elif stat2.resetStatus == 1:
-            resetStr = 'analog'
+            resetStr = 'analog-reset'
         elif stat2.resetStatus == 2:
-            resetStr = 'pin'
+            resetStr = 'NRESET-pin'
         elif stat2.resetStatus == 3:
-            resetStr = 'system'
+            resetStr = 'system-reset'
         elif stat2.resetStatus == 4:
-            resetStr = 'watchdog'
+            resetStr = 'watchdog-reset'
         elif stat2.resetStatus == 5:
-            resetStr = 'nSS'
+            resetStr = 'nSS-wakeup'
         elif stat2.resetStatus == 6:
-            resetStr = 'RTC'
+            resetStr = 'RTC-restart'
         else:
             resetStr = '?' + str(stat2.resetStatus) + '?'
 
@@ -290,7 +290,7 @@ class Hla(HighLevelAnalyzer):
         else:
             cmStr = '?' + str(stat2.chipMode) + '?'
 
-        my_str = my_str + ' reset ' + resetStr + '  ' + cmStr 
+        my_str = my_str + ' ' + resetStr + '  ' + cmStr 
         if stat2.bootLoader == 0:
             my_str = my_str + ' BOOT'
         return my_str
@@ -619,7 +619,7 @@ class Hla(HighLevelAnalyzer):
         tune = self.ba_mosi[2]
         delay = int.from_bytes(bytearray(self.ba_mosi[3:6]), 'big')
         volts = self.tuneDict[tune]
-        return 'SetTcxoMode ' + str(volts) + 'v %.3f' % (delay * 0.3052) + 'ms'
+        return 'SetTcxoMode ' + str(volts) + 'v %.3f' % (delay * 0.03052) + 'ms'
 
     def SetSleep(self):
         cfg = SleepConfig()
@@ -924,6 +924,9 @@ class Hla(HighLevelAnalyzer):
     def ResponseWifiReadResults(self):
         return 'TODO ResponseWifiReadResults'
 
+    def WifiScanTimeLimit(self):
+        return 'WifiScanTimeLimit TODO'
+
     def WifiGetNbResults(self):
         self.next_transfer_response = 1
         return 'WifiGetNbResults'
@@ -951,6 +954,10 @@ class Hla(HighLevelAnalyzer):
     def WifiReadCumulTimings(self):
         self.next_transfer_response = 1
         return 'WifiReadCumulTimings'
+
+    def WifiCfgTimestampAPphone(self):
+        ts = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        return 'WifiCfgTimestampAPphone ' + str(ts) + ' seconds'
 
     def WifiResetCumulTimings(self):
         return 'WifiResetCumulTimings'
@@ -1091,10 +1098,12 @@ class Hla(HighLevelAnalyzer):
         0x0227: SetRxBoosted,
         0x022b: SetLoraSyncWord,
         0x0230: GetLoRaRxHeaderInfos,
+        0x0301: WifiScanTimeLimit,
         0x0305: WifiGetNbResults,
         0x0306: WifiReadResults,
         0x0307: WifiResetCumulTimings,
         0x0308: WifiReadCumulTimings,
+        0x030b: WifiCfgTimestampAPphone,
         0x0400: GnssSetConstellationToUse,
         0x0409: GnssAutonomous,
         0x040a: GnssAssisted,
