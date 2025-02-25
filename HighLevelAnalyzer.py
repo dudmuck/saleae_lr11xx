@@ -901,6 +901,37 @@ class Hla(HighLevelAnalyzer):
             my_str = '?' + hex(en) + '?'
         return 'SetRxBoosted ' + my_str
 
+    def SetRssiCalibration(self):
+        _str = "G4=" + str(self.ba_mosi[2] & 0x0f)
+        _str = _str + " G5=" + str(self.ba_mosi[2] >> 4)
+
+        _str = _str + " G6=" + str(self.ba_mosi[3] & 0x0f)
+        _str = _str + " G7=" + str(self.ba_mosi[3] >> 4)
+
+        _str = _str + " G8=" + str(self.ba_mosi[4] & 0x0f)
+        _str = _str + " G9=" + str(self.ba_mosi[4] >> 4)
+
+        _str = _str + " G10=" + str(self.ba_mosi[5] & 0x0f)
+        _str = _str + " G11=" + str(self.ba_mosi[5] >> 4)
+
+        _str = _str + " G12=" + str(self.ba_mosi[6] & 0x0f)
+        _str = _str + " G13=" + str(self.ba_mosi[6] >> 4)
+
+        _str = _str + " G13hp1=" + str(self.ba_mosi[7] & 0x0f)
+        _str = _str + " G13hp2=" + str(self.ba_mosi[7] >> 4)
+
+        _str = _str + " G13hp3=" + str(self.ba_mosi[8] & 0x0f)
+        _str = _str + " G13hp4=" + str(self.ba_mosi[8] >> 4)
+
+        _str = _str + " G13hp5=" + str(self.ba_mosi[9] & 0x0f)
+        _str = _str + " G13hp6=" + str(self.ba_mosi[9] >> 4)
+
+        _str = _str + " G13hp7=" + str(self.ba_mosi[10] & 0x0f)
+
+        gainOffset = int.from_bytes(bytearray(self.ba_mosi[11:]), 'big')
+        _str = _str + " GainOffset=" + str(gainOffset)
+        return "SetRssiCalibration " + _str
+
     def SetLoraSyncWord(self):
         return 'SetLoraSyncWord ' + hex(self.ba_mosi[2])
 
@@ -1060,6 +1091,16 @@ class Hla(HighLevelAnalyzer):
         self.next_transfer_response = 1
         return 'GnssReadResults'
 
+    def Reboot(self):
+        StayInBootLoader = self.ba_mosi[2]
+        if StayInBootLoader == 0:
+            _str = 'restart'
+        elif StayInBootLoader == 3:
+            _str = 'StayInBootLoader'
+        else:
+            _str = '??'
+        return 'Reboot ' + _str
+
     cmdDict = {
         0x0101: GetVersion,
         0x0106: ReadRegMem32,
@@ -1096,6 +1137,7 @@ class Hla(HighLevelAnalyzer):
         0x0217: StopTimeoutOnPreamble,
         0x021b: SetLoRaSynchTimeout,
         0x0227: SetRxBoosted,
+        0x0229: SetRssiCalibration,
         0x022b: SetLoraSyncWord,
         0x0230: GetLoRaRxHeaderInfos,
         0x0301: WifiScanTimeLimit,
@@ -1119,6 +1161,8 @@ class Hla(HighLevelAnalyzer):
         0x0434: GnssReadTime,
         0x044a: GnssReadCumulTiming,
         0x0457: GnssReadAlmanacStatus,
+        0x0118: Reboot, # called when in transceiver
+        0x8005: Reboot, # called when in bootloader
     }
 
     def ResponseGetVersion(self):
