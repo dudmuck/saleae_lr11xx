@@ -9,11 +9,13 @@ c_uint8 = ctypes.c_uint8
 c_uint32 = ctypes.c_uint32
 
 
-class PacketType(Enum):
-    NONE = 0 
-    LORA = 1,
-    FSK = 2,
-    FHSS = 3
+class PacketType(Enum): # lr11xx_radio_pkt_type_t
+    NONE = 0
+    FSK = 1
+    LORA = 2
+    BPSK = 3
+    FHSS = 4
+    RTTOF = 5
 
 class RxStatus_bits( ctypes.LittleEndianStructure ):
     _fields_ = [
@@ -209,16 +211,16 @@ class Hla(HighLevelAnalyzer):
     }
 
     lora_bws = {
-        0x00: 7.81,
-        0x08: 10.42,
-        0x01: 15.63,
-        0x09: 20.8,
-        0x02: 31.25,
-        0x0a: 41.67,
-        0x03: 62.5,
-        0x04: 125,
-        0x05: 250,
-        0x06: 500,
+        0x00: '7.81',
+        0x08: '10.42',
+        0x01: '15.63',
+        0x09: '20.8',
+        0x02: '31.25',
+        0x0a: '41.67',
+        0x03: '62.5',
+        0x04: '125',
+        0x05: '250',
+        0x06: '500',
     }
 
     crs = {
@@ -451,6 +453,11 @@ class Hla(HighLevelAnalyzer):
         syncWord = int.from_bytes(bytearray(self.ba_mosi[2:10]), 'big')
         return 'SetGfskSyncWord ' + hex(syncWord)
 
+    def SetLoRaPublicNetwork(self):
+        # lr11xx_radio_lora_network_type_t
+        ntDict = { 0: 'PRIVATE', 1: 'PUBLIC' }
+        return 'SetLoRaPublicNetwork ' + ntDict.get(self.ba_mosi[2], hex(self.ba_mosi[2])+'?')
+
     def SetRx(self):
         timeout = int.from_bytes(bytearray(self.ba_mosi[2:5]), 'big')
         if timeout == 0xffffff:
@@ -473,6 +480,18 @@ class Hla(HighLevelAnalyzer):
     def SetRfFrequency(self):
         hz = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
         return 'SetRfFrequency %.3f' % (hz / 1000000) + 'MHz'
+
+    def AutoTxRx(self):
+        im = {
+            0: 'SLEEP',
+            1: 'STANDBY_RC',
+            2: 'STANDBY_XOSC',
+            3: 'FS',
+        }
+        delay = int.from_bytes(bytearray(self.ba_mosi[2:5]), 'big')
+        intermediary_mode = self.ba_mosi[5] # lr11xx_radio_intermediary_mode_t
+        timeout = int.from_bytes(bytearray(self.ba_mosi[6:9]), 'big')
+        return 'AutoTxRx delay ' + str(delay) + ', intermediary ' + im.get(intermediary_mode, hex(intermediary_mode)+'?') + ', timeout ' + str(timeout)
 
     def SetSleep(self):
         cfg = SleepConfig()
@@ -497,15 +516,37 @@ class Hla(HighLevelAnalyzer):
         7: 3.3,
     }
 
+    def GetStatus(self):
+        return 'GetStatus'
+
     def GetVersion(self):
         self.next_transfer_response = 1
         return 'GetVersion (request)'
+
+    def WriteRegMem32(self):
+        addr = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        _len = len(self.ba_mosi) - 6 # two byte command, four byte address
+        return 'WriteRegMem32 '+ hex(addr)+', ' + str(_len) + ' data bytes'
+
+    def WriteRegMem8(self):
+        addr = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        _len = len(self.ba_mosi) - 6 # two byte command, four byte address
+        return 'WriteRegMem8 '+ hex(addr)+', ' + str(_len) + ' data bytes'
 
     def ReadRegMem32(self):
         self.next_transfer_response = 1
         addr = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
         l = self.ba_mosi[6]
         return 'ReadRegMem32 ' + hex(addr) + ', ' + str(l);
+
+    def ReadRegMem8(self):
+        self.next_transfer_response = 1
+        addr = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        l = self.ba_mosi[6]
+        return 'ReadRegMem8 ' + hex(addr) + ', ' + str(l);
+
+    def ClearRxBuffer(self):
+        return 'ClearRxBuffer'
 
     def ReadBuffer8(self):
         self.next_transfer_response = 1
@@ -524,7 +565,7 @@ class Hla(HighLevelAnalyzer):
 
     def GetErrors(self):
         self.next_transfer_response = 1
-        return 'GetErrors'
+        return 'GetErrors (request)'
 
     def ClearErrors(self):
         return 'ClearErrors'
@@ -590,8 +631,15 @@ class Hla(HighLevelAnalyzer):
         return 'CalibImage '  + str1 + ', ' + str2
 
     def SetDioAsRfSwitch(self):
-        #TODO what is the new-line character
-        return 'SetDioAsRfSwitch '
+        enable = self.ba_mosi[2]
+        standby = self.ba_mosi[3]
+        rx = self.ba_mosi[4]
+        tx = self.ba_mosi[5]
+        tx_hp = self.ba_mosi[6] # high power transmit
+        tx_hf = self.ba_mosi[7] # high frequency transmit
+        gnss = self.ba_mosi[8]
+        wifi = self.ba_mosi[9]
+        return f'SetDioAsRfSwitch enable=0x{enable:02x} standby=0x{standby:02x} rx=0x{rx:02x} tx=0x{tx:02x} tx_hp=0x{tx_hp:02x} tx_hf=0x{tx_hf:02x} gnss=0x{gnss:02x} wifi=0x{wifi:02x}'
 
     def SetDioIrqParams(self):
         irq1 = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
@@ -621,6 +669,23 @@ class Hla(HighLevelAnalyzer):
         volts = self.tuneDict[tune]
         return 'SetTcxoMode ' + str(volts) + 'v %.3f' % (delay * 0.03052) + 'ms'
 
+    def Reboot(self):
+        stay_in_bootloader = self.ba_mosi[2]
+        _str = ''
+        if stay_in_bootloader == 3:
+            _str = 'stay_in_bootloader'
+        elif stay_in_bootloader != 0:
+            _str = hex(stay_in_bootloader) + '?'
+        return 'Reboot ' + _str
+
+    def GetVbat(self):
+        self.next_transfer_response = 1
+        return 'GetVbat (request)'
+
+    def GetTemp(self):
+        self.next_transfer_response = 1
+        return 'GetTemp (request)'
+
     def SetSleep(self):
         cfg = SleepConfig()
         cfg.asByte = self.ba_mosi[2]
@@ -643,6 +708,78 @@ class Hla(HighLevelAnalyzer):
             my_str = '?' + hex(cfg) + '?'
         return 'SetStandby ' + my_str
 
+    def SetFs(self):
+        return 'SetFs'
+
+    def GetRandomNumber(self):
+        self.next_transfer_response = 1
+        return 'GetRandomNumber (request)'
+
+    def EraseFlash(self):
+        return 'EraseFlash'
+
+    def WriteFlashEncrypted(self):
+        offset = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        length_bytes = len(self.ba_mosi) - 6
+        length_words = length_bytes // 4
+        return f'WriteFlashEncrypted offset=0x{offset:08x} length={length_words} words ({length_bytes} bytes)'
+
+    def GetPin(self):
+        self.next_transfer_response = 1
+        return 'GetPin (request)'
+
+    def ReadChipEui(self):
+        self.next_transfer_response = 1
+        return 'ReadChipEui (request)'
+
+    def ReadJoinEui(self):
+        self.next_transfer_response = 1
+        return 'ReadJoinEui (request)'
+
+    def EraseInfoPage(self):
+        ipDict = { 0: 'INFOPAGE_0', 1: 'INFOPAGE_1' }
+        infopage_id = self.ba_mosi[2]
+        return 'EraseInfoPage ' + ipDict.get(infopage_id, hex(infopage_id)+'?')
+
+    def WriteInfoPage(self):
+        ipDict = { 0: 'INFOPAGE_0', 1: 'INFOPAGE_1' }
+        infopage_id = self.ba_mosi[2]
+        address = int.from_bytes(bytearray(self.ba_mosi[3:5]), 'big')
+        length_bytes = len(self.ba_mosi) - 5
+        length_words = length_bytes // 4
+        return f'WriteInfoPage {ipDict.get(infopage_id, hex(infopage_id)+"?")} address=0x{address:04x} length={length_words} words ({length_bytes} bytes)'
+
+    def ReadInfoPage(self):
+        ipDict = { 0: 'INFOPAGE_0', 1: 'INFOPAGE_1' }
+        self.next_transfer_response = 1
+        infopage_id = self.ba_mosi[2] # lr11xx_system_infopage_id_t
+        address = int.from_bytes(bytearray(self.ba_mosi[3:5]), 'big')
+        length = self.ba_mosi[5]
+        return 'ReadInfoPage infopage_id ' + ipDict.get(infopage_id, hex(infopage_id)+'?') + ', address ' + hex(address) + ', length ' + str(length)
+
+    def GetChipEui(self):
+        self.next_transfer_response = 1
+        return 'GetChipEui (request)'
+
+    def GetSemtechJoinEui(self):
+        self.next_transfer_response = 1
+        return 'GetSemtechJoinEui (request)'
+
+    def DeriveRootKeysAndGetPin(self):
+        self.next_transfer_response = 1
+        if len(self.ba_mosi) > 2:
+            dev_eui = int.from_bytes(bytearray(self.ba_miso[2:10]), 'big')
+            join_eui = int.from_bytes(bytearray(self.ba_miso[10:18]), 'big')
+            _str = 'dev_eui ' + hex(dev_eui) + ', join_eui ' + hex(join_eui)
+        else:
+            _str = '(request)'
+
+        return 'DeriveRootKeysAndGetPin ' + _str
+
+    def EnableSpiCrc(self):
+        ed = { 0: 'disable', 1: 'enable_crc' }
+        return 'EnableSpiCrc ' + ed.get(self.ba_mosi[2], hex(self.ba_mosi[2])+'?')
+
     def DriveDiosInSleepMode(self):
         ena = self.ba_mosi[2]
         _str = 'DriveDiosInSleepMode '
@@ -651,6 +788,17 @@ class Hla(HighLevelAnalyzer):
         else:
             _str = _str + 'floating'
         return _str
+
+    def ResetStats(self):
+        return 'ResetStats'
+
+    def GetStats(self):
+        self.next_transfer_response = 1
+        return 'GetStats (request)'
+
+    def GetPacketType(self):
+        self.next_transfer_response = 1
+        return 'GetPacketType (request)'
 
     def SetCadParams(self):
         my_str = str(self.ba_mosi[2]) + ' symbols'
@@ -690,25 +838,14 @@ class Hla(HighLevelAnalyzer):
     }
 
     def SetPacketType(self):
-        if self.ba_mosi[2] == 0:
-            self.pt = PacketType.NONE
-            my_str = 'NONE'
-        elif self.ba_mosi[2] == 1:
-            self.pt = PacketType.FSK
-            my_str = 'FSK'
-        elif self.ba_mosi[2] == 2:
-            self.pt = PacketType.LORA
-            my_str = 'LoRa'
-        elif self.ba_mosi[2] == 4:
-            self.pt = PacketType.FHSS
-            my_str = 'FHSS'
-        else:
-            self.pt = PacketType.NONE
-            my_str = '?' + hex(self.ba_mosi[2]) + '?'
-        return 'SetPacketType ' + my_str
+        self.pt = PacketType(self.ba_mosi[2])
+        return 'SetPacketType ' + self.pt.name
 
     def SetModulationParams(self):
         if self.pt == PacketType.FSK:
+            _len = len(self.ba_mosi)
+            if _len < 12:
+                return 'SetModulationParams error, need 12 mosi bytes, have ' + str(_len)
             br = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
             my_str = str(br) + 'bps '
             bt = self.ba_mosi[6]
@@ -724,17 +861,17 @@ class Hla(HighLevelAnalyzer):
                 my_str = my_str + 'BT1.0'
             else:
                 my_str = my_str + '?' + hex(bt) + '?'
-            bw = self.fsk_bwDict[self.ba_mosi[7]]
+            bw = self.fsk_bwDict.get(self.ba_mosi[7], self.ba_mosi[7])
             my_str = my_str + ' rxbw:' + str(bw) + 'Hz '
             fdev = int.from_bytes(bytearray(self.ba_mosi[8:12]), 'big')
             my_str = my_str + 'fdev:' + str(fdev) + 'Hz'
-        elif self.pt == PacketType.LORA:
+        elif self.pt == PacketType.LORA or self.pt == PacketType.RTTOF:
             sf = self.ba_mosi[2]
             my_str = 'SF' + str(sf)
             bw = self.ba_mosi[3]
-            my_str = my_str + ' bw ' + str(self.lora_bws[bw]) + 'KHz'
+            my_str = my_str + ' bw ' + self.lora_bws.get(bw, hex(bw)+'?') + 'KHz'
             cr = self.ba_mosi[4]
-            my_str = my_str + ' ' + str(self.crs[bw]) + ' '
+            my_str = my_str + ' ' + self.crs.get(cr, hex(cr)+'?') + ' '
             ldro = self.ba_mosi[5]
             if ldro == 0:
                 my_str = my_str + 'LDRO_OFF'
@@ -742,8 +879,17 @@ class Hla(HighLevelAnalyzer):
                 my_str = my_str + 'LDRO_ON'
             else:
                 my_str = my_str + '?' + hex(ldro) + '?'
+        elif self.pt == PacketType.BPSK:
+            # lr11xx_radio_mod_params_bpsk_t
+            br_in_bps = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+            pulse_shape = self.ba_mosi[6] #  lr11xx_radio_bpsk_pulse_shape_t
+            my_str = str(br_in_bps) + ' bps '
+            if pulse_shape == 0x16: # LR11XX_RADIO_DBPSK_PULSE_SHAPE
+                my_str = my_str + ' Double OSR / RRC / BT 0.7'
+            else:
+                my_str = my_str + hex(pulse_shape) + '?'
         else:
-            my_str = 'TODO pktType ' + str(self.pt)
+            my_str = 'TODO pktType ' + self.pt.name
         return 'SetModulationParams ' + my_str
 
     def SetPacketParams(self):
@@ -804,7 +950,7 @@ class Hla(HighLevelAnalyzer):
             dcFree = self.ba_mosi[10]
             if dcFree == 1:
                 my_str = my_str + ' dcFree'
-        elif self.pt == PacketType.LORA:
+        elif self.pt == PacketType.LORA or self.pt == PacketType.RTTOF:
             preambleLength = int.from_bytes(bytearray(self.ba_mosi[2:4]), 'big')
             my_str = 'preamble ' + str(preambleLength)
             headerType = self.ba_mosi[4]
@@ -833,8 +979,16 @@ class Hla(HighLevelAnalyzer):
             else:
                 iqStr = hex(iqInv)
             my_str = my_str + ' IQ ' + iqStr
+        elif self.pt == PacketType.BPSK:
+            # lr11xx_radio_pkt_params_bpsk_t
+            pld_len_in_bytes = self.ba_mosi[2]
+            ramp_up_delay = int.from_bytes(bytearray(self.ba_mosi[3:5]), 'big')
+            ramp_down_delay = int.from_bytes(bytearray(self.ba_mosi[5:7]), 'big')
+            pld_len_in_bits = int.from_bytes(bytearray(self.ba_mosi[7:9]), 'big')
+            my_str = 'payload length ' + str(pld_len_in_bytes) + ' bytes ' +str(pld_len_in_bits)+ ' bits, '
+            my_str = my_str + 'ramp_up_delay ' +str(ramp_up_delay)+', ramp_down_delay '+str(ramp_down_delay)
         else:
-            my_str = 'TODO pktType ' + str(self.pt)
+            my_str = 'TODO pktType ' + self.pt.name
         return 'SetPacketParams ' + my_str
 
     def SetTxParams(self):
@@ -844,6 +998,11 @@ class Hla(HighLevelAnalyzer):
         else:
             dBm = txp
         return 'SetTxParams ' + str(dBm) + 'dBm ' + str(self.rampDict[self.ba_mosi[3]]) + 'μs'
+
+    def SetPacketAdrs(self):
+        node_address = self.ba_mosi[2]
+        broadcast_address = self.ba_mosi[3]
+        return 'SetPacketAdrs node_address ' + hex(node_address) + ', broadcast_address ' + hex(broadcast_address)
 
     def SetRxTxFallbackMode(self):
         mode = self.ba_mosi[2]
@@ -856,6 +1015,13 @@ class Hla(HighLevelAnalyzer):
         else:
             my_str = '?' + hex(mode) + '?'
         return 'SetRxTxFallbackMode ' + my_str
+
+    def SetRxDutyCycle(self):
+        dcModeDict = { 0: 'RX', 1: 'CAD' } # lr11xx_radio_rx_duty_cycle_mode_t
+        rx_period_in_rtc_step = int.from_bytes(bytearray(self.ba_mosi[2:5]), 'big')
+        sleep_period_in_rtc_step = int.from_bytes(bytearray(self.ba_mosi[5:8]), 'big')
+        mode = self.ba_mosi[8]
+        return 'SetRxDutyCycle rx_period ' + str(rx_period_in_rtc_step) + ', sleep_period ' + str(sleep_period_in_rtc_step) + ', mode ' + dcModeDict.get(mode, hex(mode)+'?')
 
     def SetPaConfig(self):
         paSel = self.ba_mosi[2]
@@ -888,8 +1054,49 @@ class Hla(HighLevelAnalyzer):
             my_str = '?' + hex(stop) + '?'
         return 'StopTimeoutOnPreamble ' + my_str
 
+    def SetCad(self):
+        return 'SetCad'
+
+    def SetTxCw(self):
+        return 'SetTxCw'
+
+    def SetTxInfinitePreamble(self):
+        return 'SetTxInfinitePreamble'
+
     def SetLoRaSynchTimeout(self):
         return 'SetLoRaSynchTimeout ' + str(self.ba_mosi[2]) + ' symbols'
+
+    def SetRangingAddr(self):
+        address = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        return 'SetRangingAddr address ' + hex(address) + ', check_length ' + str(self.ba_mosi[6])
+
+    def SetRangingReqAddr(self):
+        request_address = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        return 'SetRangingReqAddr request_address ' + hex(request_address)
+
+    def GetRangingResult(self):
+        self.next_transfer_response = 1
+        rt = { 0: 'RAW', 1: 'RSSI' } # lr11xx_rttof_result_type_t
+        self.ranging_result_type = self.ba_mosi[2]
+        return 'GetRangingResult ' + rt.get(self.ba_mosi[2], hex(self.ba_mosi[2])+'?')
+
+    def SetRangingTxRxDelay(self):
+        delay_indicator = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        return 'SetRangingTxRxDelay ' + str(delay_indicator)
+
+    def GnssReadRssiTest(self):
+        self.next_transfer_response = 1
+        path = self.ba_mosi[2]
+        return f'GnssReadRssiTest path=0x{path:02x}'
+
+    def SetGfskCrcParams(self):
+        seed = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
+        polynomial = int.from_bytes(bytearray(self.ba_mosi[6:10]), 'big')
+        return f'SetGfskCrcParams seed=0x{seed:08x} polynomial=0x{polynomial:08x}'
+
+    def SetGfskWhiteningParams(self):
+        seed = int.from_bytes(bytearray(self.ba_mosi[2:4]), 'big')
+        return f'SetGfskWhiteningParams seed=0x{seed:04x}'
 
     def SetRxBoosted(self):
         en = self.ba_mosi[2]
@@ -901,12 +1108,93 @@ class Hla(HighLevelAnalyzer):
             my_str = '?' + hex(en) + '?'
         return 'SetRxBoosted ' + my_str
 
+    def SetRangingParameter(self):
+        nb_symbols = self.ba_mosi[3]
+        return 'SetRangingParameter nb_symbols ' + str(nb_symbols)
+
+    def SetRssiCalibration(self):
+        print('SetRssiCalibration:')
+        g5 = self.ba_mosi[2] >> 4
+        g4 = self.ba_mosi[2] & 0x0f
+        g7 = self.ba_mosi[3] >> 4
+        g6 = self.ba_mosi[3] & 0x0f
+        print(f'g4: {g4}, g5: {g5}, g6: {g6}, g7: {g7}')
+
+        g9 = self.ba_mosi[4] >> 4
+        g8 = self.ba_mosi[4] & 0x0f
+
+        g11 = self.ba_mosi[5] >> 4
+        g10 = self.ba_mosi[5] & 0x0f
+        print(f'g8: {g8}, g9: {g9}, g10: {g10}, g11: {g11}')
+
+        g13 = self.ba_mosi[6] >> 4
+        g12 = self.ba_mosi[6] & 0x0f
+        print(f'g12: {g12}, g13: {g13}')
+
+        g13hp2 = self.ba_mosi[7] >> 4
+        g13hp1 = self.ba_mosi[7] & 0x0f
+        print(f'g13hp1: {g13hp1}, g13hp2: {g13hp2}')
+
+        g13hp4 = self.ba_mosi[8] >> 4
+        g13hp3 = self.ba_mosi[8] & 0x0f
+        print(f'g13hp3: {g13hp3}, g13hp4: {g13hp4}')
+
+        g13hp6 = self.ba_mosi[9] >> 4
+        g13hp5 = self.ba_mosi[9] & 0x0f
+        print(f'g13hp5: {g13hp5}, g13hp6: {g13hp6}')
+
+        g13hp7 = self.ba_mosi[10] & 0x0f #( uint8_t ) ( rssi_cal_table->gain_tune.g13hp7 & 0x0F ),
+        gain_offset = int.from_bytes(bytearray(self.ba_mosi[11:13]), 'big')
+        print(f'g13hp7: {g13hp7}, gain_offset: {gain_offset}')
+        return 'SetRssiCalibration (see terminal)'
+
     def SetLoraSyncWord(self):
         return 'SetLoraSyncWord ' + hex(self.ba_mosi[2])
+
+    def LrFhssBuildFrame(self):
+        enDict = { 0: 'ENABLE', 1: 'DISABLE' }
+        crDict = { 0: '5_6', 1: '2_3', 2: '1_2', 3: '2_3' }
+        gridDict = { 0: '25391', 1: '3906' }
+        modDict = { 0: 'GMSK_488' }
+        bwDict = {
+            0x00: '39063',
+            0x01: '85938',
+            0x02: '136719',
+            0x03: '183594',
+            0x04: '335938',
+            0x05: '386719',
+            0x06: '722656',
+            0x07: '773438',
+            0x08: '1523438',
+            0x09: '1574219',
+        }
+        # lr11xx_lr_fhss_params_t
+        header_count = self.ba_mosi[2] # uint8_t
+        cr = self.ba_mosi[3] # lr_fhss_v1_cr_t
+        modulation_type = self.ba_mosi[4] # 
+        grid = self.ba_mosi[5] # lr_fhss_v1_grid_t
+        enable_hopping = self.ba_mosi[6] # 
+        bw = self.ba_mosi[7] # lr_fhss_v1_bw_t
+        hop_sequence_id = int.from_bytes(bytearray(self.ba_mosi[8:10]), 'big')
+        device_offset = self.ba_mosi[10]
+        return 'LrFhssBuildFrame header_count ' + str(header_count) + ', CR_' + crDict.get(cr, hex(cr)+'?') + ', moulation '+modDict.get(modulation_type, hex(modulation_type)+'?')+ ', hopping ' + enDict.get(enable_hopping, hex(enable_hopping)+'?') + ', bw '+bwDict.get(bw, hex(bw)+'?')+'Hz, hop_sequence_id '+str(hop_sequence_id)+', device_offset ' + str(device_offset)
+
+    def LrFhssSetSyncWord(self):
+        return 'LrFhssSetSyncWord TODO'
+
+    def ConfigBleBeacon(self):
+        channel_id = self.ba_mosi[2]
+        # the rest is advertising channel PDU
+        return 'ConfigBleBeacon channel_id '+str(channel_id)
 
     def GetLoRaRxHeaderInfos(self):
         self.next_transfer_response = 1
         return 'GetLoRaRxHeaderInfos (request) '
+
+    def BleBeaconSend(self):
+        channel_id = self.ba_mosi[2]
+        data_len = len(self.ba_mosi) - 3  # 2 byte opcode + 1 byte channel_id
+        return 'BleBeaconSend channel=' + str(channel_id) + ', ' + str(data_len) + ' data bytes'
 
     def gnss_scan(self, label):
         time = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
@@ -922,10 +1210,129 @@ class Hla(HighLevelAnalyzer):
         return label + ' ' + str(time) + ' ' + estr + ' resultMask=' + hex(resultMask) + ' nbSvMax=' + str(nbSvMax)
 
     def ResponseWifiReadResults(self):
-        return 'TODO ResponseWifiReadResults'
+        result_format = getattr(self, 'wifi_result_format', None)
+        result_count = getattr(self, 'wifi_result_count', 0)
+
+        if result_format is None:
+            return 'WifiReadResults response ' + str(len(self.ba_miso) - 1) + ' bytes'
+
+        data_len = len(self.ba_miso) - 1  # Exclude stat1 byte
+        offset = 1  # Start after stat1
+
+        if result_format == 1:  # BASIC_COMPLETE
+            result_size = 22
+            _str = f'WifiReadResults {result_count} results (basic): '
+            for i in range(result_count):
+                if offset + result_size > len(self.ba_miso):
+                    break
+                rssi = self.ba_miso[offset + 2]
+                mac = ':'.join(f'{self.ba_miso[offset + 4 + j]:02x}' for j in range(6))
+                _str += f'[RSSI=-{rssi/2:.0f}dBm MAC={mac}] '
+                offset += result_size
+            return _str.rstrip()
+
+        elif result_format == 4:  # BASIC_MAC_TYPE_CHANNEL
+            result_size = 9
+            _str = f'WifiReadResults {result_count} results (mac/type/ch): '
+            for i in range(result_count):
+                if offset + result_size > len(self.ba_miso):
+                    break
+                channel = self.ba_miso[offset + 1] & 0x0F
+                rssi = self.ba_miso[offset + 2]
+                mac = ':'.join(f'{self.ba_miso[offset + 3 + j]:02x}' for j in range(6))
+                _str += f'[CH={channel} RSSI=-{rssi/2:.0f}dBm MAC={mac}] '
+                offset += result_size
+            return _str.rstrip()
+
+        else:
+            return f'WifiReadResults response format={result_format}, {data_len} bytes'
+
+    def WifiScan(self):
+        signal_type_dict = {
+            1: 'B',
+            2: 'G',
+            3: 'N',
+            4: 'B_G_N'
+        }
+        scan_mode_dict = {
+            1: 'BEACON',
+            2: 'BEACON_AND_PKT',
+            4: 'FULL_BEACON',
+            5: 'UNTIL_SSID'
+        }
+
+        signal_type = self.ba_mosi[2]
+        channels = int.from_bytes(bytearray(self.ba_mosi[3:5]), 'big')
+        scan_mode = self.ba_mosi[5]
+        max_results = self.ba_mosi[6]
+        nb_scan_per_channel = self.ba_mosi[7]
+        timeout_ms = int.from_bytes(bytearray(self.ba_mosi[8:10]), 'big')
+        abort_on_timeout = self.ba_mosi[10]
+
+        # Decode channel mask
+        channel_list = []
+        for i in range(14):
+            if channels & (1 << i):
+                channel_list.append(str(i + 1))
+        channels_str = ','.join(channel_list) if channel_list else 'none'
+
+        _str = 'WifiScan '
+        _str += signal_type_dict.get(signal_type, f'?{signal_type}?') + ' '
+        _str += f'ch:[{channels_str}] '
+        _str += scan_mode_dict.get(scan_mode, f'mode{scan_mode}') + ' '
+        _str += f'max:{max_results} '
+        _str += f'scans/ch:{nb_scan_per_channel} '
+        _str += f'timeout:{timeout_ms}ms '
+        _str += 'abort' if abort_on_timeout else 'no-abort'
+
+        return _str
 
     def WifiScanTimeLimit(self):
-        return 'WifiScanTimeLimit TODO'
+        signal_type_dict = {
+            1: 'B',
+            2: 'G',
+            3: 'N',
+            4: 'B_G_N'
+        }
+        scan_mode_dict = {
+            1: 'BEACON',
+            2: 'BEACON_AND_PKT',
+            4: 'FULL_BEACON',
+            5: 'UNTIL_SSID'
+        }
+
+        signal_type = self.ba_mosi[2]
+        channels = int.from_bytes(bytearray(self.ba_mosi[3:5]), 'big')
+        scan_mode = self.ba_mosi[5]
+        max_results = self.ba_mosi[6]
+        timeout_per_channel_ms = int.from_bytes(bytearray(self.ba_mosi[7:9]), 'big')
+        timeout_per_scan_ms = int.from_bytes(bytearray(self.ba_mosi[9:11]), 'big')
+
+        # Decode channel mask
+        channel_list = []
+        for i in range(14):
+            if channels & (1 << i):
+                channel_list.append(str(i + 1))
+        channels_str = ','.join(channel_list) if channel_list else 'none'
+
+        _str = 'WifiScanTimeLimit '
+        _str += signal_type_dict.get(signal_type, f'?{signal_type}?') + ' '
+        _str += f'ch:[{channels_str}] '
+        _str += scan_mode_dict.get(scan_mode, f'mode{scan_mode}') + ' '
+        _str += f'max:{max_results} '
+        _str += f'timeout/ch:{timeout_per_channel_ms}ms '
+        _str += f'timeout/scan:{timeout_per_scan_ms}ms'
+
+        return _str
+
+    def WifiCountryCodeTimeLimit(self):
+        return 'WifiCountryCodeTimeLimit TODO'
+
+    def WifiCountryCode(self):
+        return 'WifiCountryCode TODO'
+
+    def WifiCountryCodeTimeLimit(self):
+        return 'WifiCountryCodeTimeLimit TODO'
 
     def WifiGetNbResults(self):
         self.next_transfer_response = 1
@@ -938,6 +1345,8 @@ class Hla(HighLevelAnalyzer):
         _str = "index:" + str(self.ba_mosi[2])
         _str = _str +  " NbResults:" + str(self.ba_mosi[3])
         _format = self.ba_mosi[4]
+        self.wifi_result_format = _format
+        self.wifi_result_count = self.ba_mosi[3]
         _str = _str + ' format:'
         if _format == 1:
             _str = _str + "basic"
@@ -949,15 +1358,46 @@ class Hla(HighLevelAnalyzer):
         return 'WifiReadResults ' + _str
 
     def ResponseWifiReadCumulTimings(self):
-        return 'TODO ResponseWifiReadCumulTimings'
+        if len(self.ba_miso) < 17:  # Need stat1 + 16 bytes of data
+            return 'WifiReadCumulTimings response (insufficient data)'
+
+        rx_detection_us = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
+        rx_correlation_us = int.from_bytes(bytearray(self.ba_miso[5:9]), 'big')
+        rx_capture_us = int.from_bytes(bytearray(self.ba_miso[9:13]), 'big')
+        demodulation_us = int.from_bytes(bytearray(self.ba_miso[13:17]), 'big')
+
+        total_us = rx_detection_us + rx_correlation_us + rx_capture_us + demodulation_us
+
+        _str = 'WifiReadCumulTimings: '
+        _str += f'detect={rx_detection_us}us '
+        _str += f'corr={rx_correlation_us}us '
+        _str += f'capt={rx_capture_us}us '
+        _str += f'demod={demodulation_us}us '
+        _str += f'total={total_us}us'
+
+        return _str
+
+    def ResponseGnssReadVersion(self):
+        gnss_firmware = self.ba_miso[1]
+        gnss_almanac = self.ba_miso[2]
+        return f'GnssReadVersion firmware=0x{gnss_firmware:02x} almanac=0x{gnss_almanac:02x}'
 
     def WifiReadCumulTimings(self):
         self.next_transfer_response = 1
         return 'WifiReadCumulTimings'
 
+    def WifiGetNbCountryCodeResults(self):
+        return 'WifiGetNbCountryCodeResults TODO'
+
+    def WifiReadCountryCodeResults(self):
+        return 'WifiReadCountryCodeResults TODO'
+
     def WifiCfgTimestampAPphone(self):
         ts = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
         return 'WifiCfgTimestampAPphone ' + str(ts) + ' seconds'
+
+    def WifiReadVersion(self):
+        return 'WifiReadVersion TODO'
 
     def WifiResetCumulTimings(self):
         return 'WifiResetCumulTimings'
@@ -970,6 +1410,37 @@ class Hla(HighLevelAnalyzer):
         if bit_mask & 2:
             _str = _str + 'BeiDou '
         return _str
+
+    def GnssReadConstellationToUse(self):
+        return 'GnssReadConstellationToUse TODO'
+
+    def GnssSetAlmanacUpdate(self):
+        return 'GnssSetAlmanacUpdate TODO'
+
+    def GnssReadAlmanacUpdate(self):
+        return 'GnssReadAlmanacUpdate TODO'
+
+    def GnssSetFreqSearchSpace(self):
+        return 'GnssSetFreqSearchSpace TODO'
+
+    def GnssReadFreqSearchSpace(self):
+        return 'GnssReadFreqSearchSpace TODO'
+
+    def GnssReadVersion(self):
+        self.next_transfer_response = 1
+        return 'GnssReadVersion (request)'
+
+    def GnssReadSupportedConstellations(self):
+        return 'GnssReadSupportedConstellations TODO'
+
+    def GnssSetMode(self):
+        scan_mode_dict = {
+            0x00: 'SINGLE_SCAN_LEGACY',
+            0x03: 'SINGLE_SCAN_AND_5_FAST_SCANS'
+        }
+        scan_mode = self.ba_mosi[2]
+        scan_mode_str = scan_mode_dict.get(scan_mode, f'UNKNOWN_0x{scan_mode:02x}')
+        return f'GnssSetMode {scan_mode_str}'
 
     def GnssAutonomous(self):
         return self.gnss_scan('GnssAutonomous')
@@ -1009,6 +1480,12 @@ class Hla(HighLevelAnalyzer):
         self.next_transfer_response = 1
         return 'GnssReadAssistancePosition'
 
+    def GnssPushSolverMsg(self):
+        return 'GnssPushSolverMsg TODO'
+
+    def GnssPushDmMsg(self):
+        return 'GnssPushDmMsg TODO'
+
     def GnssGetContextStatus(self):
         self.next_transfer_response = 1
         return 'GnssGetContextStatus'
@@ -1021,22 +1498,50 @@ class Hla(HighLevelAnalyzer):
         self.next_transfer_response = 1
         return 'GnssGetSvDetected'
 
+    def GnssReadAlmanacPerSatellite(self):
+        return 'GnssReadAlmanacPerSatellite TODO'
+
+    def GnssGetSvVisible(self):
+        return 'GnssGetSvVisible TODO'
+
+    def GnssGetSvVisibleDoppler(self):
+        return 'GnssGetSvVisibleDoppler TODO'
+
     def GnssReadLastScanModeLaunched(self):
         self.next_transfer_response = 1
         return 'GnssReadLastScanModeLaunched'
 
+    def GnssFetchTime(self):
+        effort_mode_dict = {
+            0x00: 'LOW_EFFORT',
+            0x01: 'MID_EFFORT',
+            0x02: 'HIGH_EFFORT'
+        }
+        option_dict = {
+            0: 'SEARCH_TOW',
+            1: 'SEARCH_TOW_WN',
+            2: 'SEARCH_TOW_WN_ROLLOVER'
+        }
+        effort_mode = self.ba_mosi[2]
+        option = self.ba_mosi[3]
+        effort_str = effort_mode_dict.get(effort_mode, f'UNKNOWN_0x{effort_mode:02x}')
+        option_str = option_dict.get(option, f'UNKNOWN_0x{option:02x}')
+        return f'GnssFetchTime effort={effort_str} option={option_str}'
+
     def ResponseGnssReadTime(self):
-        errorCode = self.ba_miso[1]
-        _str = 'errorCode '
-        if errorCode == 0:
-            _str = _str + 'Tow is available'
-        elif errorCode == 1:
-            _str = _str + 'no 32KHz'
-        elif errorCode == 2:
-            _str = _str + 'time not available'
-        else:
-            _str = _str + hex(errorCode)
-        return 'TODO ResponseGnssReadTime ' + _str
+        error_code_dict = {
+            0: 'NO_ERROR',
+            1: '32K_STOPPED',
+            2: 'WN_TOW_NOT_SET'
+        }
+        error_code = self.ba_miso[1]
+        gps_time_s = int.from_bytes(bytearray(self.ba_miso[2:6]), 'big')
+        nb_us_in_s_raw = int.from_bytes(bytearray(self.ba_miso[6:9]), 'big')
+        nb_us_in_s = nb_us_in_s_raw // 16
+        time_accuracy_raw = int.from_bytes(bytearray(self.ba_miso[9:13]), 'big')
+        time_accuracy = time_accuracy_raw // 16
+        error_str = error_code_dict.get(error_code, f'UNKNOWN_0x{error_code:02x}')
+        return f'GnssReadTime error={error_str} gps_time_s={gps_time_s} nb_us_in_s={nb_us_in_s} time_accuracy={time_accuracy}'
 
     def ResponseGnssReadCumulTiming(self):
         return 'GnssReadCumulTiming response'
@@ -1044,81 +1549,225 @@ class Hla(HighLevelAnalyzer):
     def ResponseGnssReadAlmanacStatus(self):
         return 'ReadAlmanacStatus response'
 
+    def ResponseGnssGetSvWarmStart(self):
+        n_SVs = len(self.ba_miso) - 1 # first byte is stat1
+        return 'GnssGetSvWarmStart ' + str(n_SVs) + ' SVs'
+
     def GnssReadTime(self):
         self.next_transfer_response = 1
         return 'GnssReadTime'
+
+    def GnssResetTime(self):
+        return 'GnssResetTime TODO'
+
+    def GnssResetPosition(self):
+        return 'GnssResetPosition TODO'
+
+    def GnssReadWeekNumberRollover(self):
+        return 'GnssReadWeekNumberRollover TODO'
+
+    def GnssReadDemodStatus(self):
+        return 'GnssReadDemodStatus TODO'
 
     def GnssReadCumulTiming(self):
         self.next_transfer_response = 1
         return 'GnssReadCumulTiming'
 
+    def GnssSetTime(self):
+        return 'GnssSetTime TODO'
+
+    def GnssConfigDelayResetAP(self):
+        return 'GnssConfigDelayResetAP TODO'
+
+    def GnssReadDelayResetAP(self):
+        return 'GnssReadDelayResetAP TODO'
+
+    def GnssReadKeepSyncStatus(self):
+        return 'GnssReadKeepSyncStatus TODO'
+
     def GnssReadAlmanacStatus(self):
         self.next_transfer_response = 1
         return 'GnssReadAlmanacStatus '
+
+    def GnssConfigAlmanacUpdatePeriod(self):
+        return 'GnssConfigAlmanacUpdatePeriod TODO'
+
+    def GnssReadAlmanacUpdatePeriod(self):
+        return 'GnssReadAlmanacUpdatePeriod TODO'
+
+    def GnssGetSvWarmStart(self):
+        self.next_transfer_response = 1
+        constellation_mask = self.ba_mosi[2]
+        return 'GnssGetSvWarmStart constellation_mask ' + str(constellation_mask)
 
     def GnssReadResults(self):
         self.next_transfer_response = 1
         return 'GnssReadResults'
 
+    def GnssAlmanacFullUpdate(self):
+        _len = len(self.ba_mosi) - 2
+        block_size = 20
+        return 'GnssAlmanacFullUpdate _len ' + str(_len) + ', blocks ' + str(_len/block_size)
+
+    def GnssAlmanacRead(self):
+        self.next_transfer_response = 1
+        return 'GnssAlmanacRead (request)'
+
     cmdDict = {
-        0x0101: GetVersion,
-        0x0106: ReadRegMem32,
-        0x0109: WriteBuffer8,
-        0x010a: ReadBuffer8,
-        0x010c: WriteRegMemMask32,
-        0x010d: GetErrors,
-        0x010e: ClearErrors,
-        0x010f: Calibrate,
-        0x0110: SetRegMode,
-        0x0111: CalibImage,
-        0x0112: SetDioAsRfSwitch,
-        0x0113: SetDioIrqParams,
-        0x0114: ClearIrq,
-        0x0116: ConfigLfClock,
-        0x0117: SetTcxoMode,
-        0x011b: SetSleep,
-        0x011c: SetStandby,
-        0x012a: DriveDiosInSleepMode,
-        0x0203: GetRxBufferStatus,
-        0x0204: GetPacketStatus,
-        0x0205: GetRssiInst,
-        0x0206: SetGfskSyncWord,
-        0x0209: SetRx,
-        0x020a: SetTx,
-        0x020b: SetRfFrequency,
-        0x020d: SetCadParams,
-        0x020e: SetPacketType,
-        0x020f: SetModulationParams,
-        0x0210: SetPacketParams,
-        0x0211: SetTxParams,
-        0x0213: SetRxTxFallbackMode,
-        0x0215: SetPaConfig,
-        0x0217: StopTimeoutOnPreamble,
-        0x021b: SetLoRaSynchTimeout,
-        0x0227: SetRxBoosted,
-        0x022b: SetLoraSyncWord,
-        0x0230: GetLoRaRxHeaderInfos,
-        0x0301: WifiScanTimeLimit,
-        0x0305: WifiGetNbResults,
-        0x0306: WifiReadResults,
-        0x0307: WifiResetCumulTimings,
-        0x0308: WifiReadCumulTimings,
-        0x030b: WifiCfgTimestampAPphone,
-        0x0400: GnssSetConstellationToUse,
-        0x0409: GnssAutonomous,
-        0x040a: GnssAssisted,
-        0x040b: GnssScan,
-        0x040c: GnssGetResultSize,
-        0x040d: GnssReadResults,
-        0x0410: GnssSetAssistancePosition,
-        0x0411: GnssReadAssistancePosition,
-        0x0416: GnssGetContextStatus,
-        0x0417: GnssGetNbSvDetected,
-        0x0418: GnssGetSvDetected,
-        0x0426: GnssReadLastScanModeLaunched,
-        0x0434: GnssReadTime,
-        0x044a: GnssReadCumulTiming,
-        0x0457: GnssReadAlmanacStatus,
+        0x0100: GetStatus, # LR11XX_BL_GET_STATUS_OC, LR11XX_SYSTEM_GET_STATUS_OC
+        0x0101: GetVersion, # LR11XX_BL_GET_VERSION_OC, LR11XX_SYSTEM_GET_VERSION_OC
+        0x0105: WriteRegMem32, # LR11XX_REGMEM_WRITE_REGMEM32_OC
+        0x0106: ReadRegMem32, # LR11XX_REGMEM_READ_REGMEM32_OC
+        0x0107: WriteRegMem8, # LR11XX_REGMEM_WRITE_MEM8_OC
+        0x0108: ReadRegMem8, # LR11XX_REGMEM_READ_MEM8_OC
+        0x0109: WriteBuffer8, # LR11XX_REGMEM_WRITE_BUFFER8_OC
+        0x010B: ClearRxBuffer, # LR11XX_REGMEM_CLEAR_RXBUFFER_OC
+        0x010a: ReadBuffer8, # LR11XX_REGMEM_READ_BUFFER8_OC
+        0x010c: WriteRegMemMask32, # LR11XX_REGMEM_WRITE_REGMEM32_MASK_OC
+        0x010d: GetErrors, # LR11XX_SYSTEM_GET_ERRORS_OC
+        0x010e: ClearErrors, # LR11XX_SYSTEM_CLEAR_ERRORS_OC
+        0x010f: Calibrate, # LR11XX_SYSTEM_CALIBRATE_OC
+        0x0110: SetRegMode, # LR11XX_SYSTEM_SET_REGMODE_OC
+        0x0111: CalibImage, # LR11XX_SYSTEM_CALIBRATE_IMAGE_OC
+        0x0112: SetDioAsRfSwitch, # LR11XX_SYSTEM_SET_DIO_AS_RF_SWITCH_OC
+        0x0113: SetDioIrqParams, # LR11XX_SYSTEM_SET_DIOIRQPARAMS_OC
+        0x0114: ClearIrq, # LR11XX_SYSTEM_CLEAR_IRQ_OC
+        0x0116: ConfigLfClock, # LR11XX_SYSTEM_CFG_LFCLK_OC
+        0x0117: SetTcxoMode, # LR11XX_SYSTEM_SET_TCXO_MODE_OC
+        0x0118: Reboot, # LR11XX_SYSTEM_REBOOT_OC
+        0x0119: GetVbat, # LR11XX_SYSTEM_GET_VBAT_OC
+        0x011a: GetTemp, # LR11XX_SYSTEM_GET_TEMP_OC
+        0x011b: SetSleep, # LR11XX_SYSTEM_SET_SLEEP_OC
+        0x011c: SetStandby, # LR11XX_SYSTEM_SET_STANDBY_OC
+        0x011d: SetFs, # LR11XX_SYSTEM_SET_FS_OC
+        0x0120: GetRandomNumber, # LR11XX_SYSTEM_GET_RANDOM_OC
+        0x0121: EraseInfoPage, # LR11XX_SYSTEM_ERASE_INFOPAGE_OC
+        0x0122: WriteInfoPage, # LR11XX_SYSTEM_WRITE_INFOPAGE_OC
+        0x0123: ReadInfoPage, # LR11XX_SYSTEM_READ_INFOPAGE_OC
+        0x0125: GetChipEui, # LR11XX_SYSTEM_READ_UID_OC
+        0x0126: GetSemtechJoinEui, # LR11XX_SYSTEM_READ_JOIN_EUI_OC
+        0x0127: DeriveRootKeysAndGetPin, # LR11XX_SYSTEM_READ_PIN_OC
+        0x0128: EnableSpiCrc, # LR11XX_SYSTEM_ENABLE_SPI_CRC_OC
+        0x012a: DriveDiosInSleepMode, # LR11XX_SYSTEM_DRIVE_DIO_IN_SLEEP_MODE_OC 
+        0x0200: ResetStats, # LR11XX_RADIO_RESET_STATS_OC
+        0x0201: GetStats, # LR11XX_RADIO_GET_STATS_OC
+        0x0202: GetPacketType, # LR11XX_RADIO_GET_PKT_TYPE_OC
+        0x0203: GetRxBufferStatus, # LR11XX_RADIO_GET_RXBUFFER_STATUS_OC
+        0x0204: GetPacketStatus, # LR11XX_RADIO_GET_PKT_STATUS_OC
+        0x0205: GetRssiInst, # LR11XX_RADIO_GET_RSSI_INST_OC
+        0x0206: SetGfskSyncWord, # LR11XX_RADIO_SET_GFSK_SYNC_WORD_OC
+        0x0208: SetLoRaPublicNetwork, # LR11XX_RADIO_SET_LORA_PUBLIC_NETWORK_OC
+        0x0209: SetRx, # LR11XX_RADIO_SET_RX_OC
+        0x020a: SetTx, # LR11XX_RADIO_SET_TX_OC
+        0x020b: SetRfFrequency, # LR11XX_RADIO_SET_RF_FREQUENCY_OC
+        0x020c: AutoTxRx, # LR11XX_RADIO_AUTOTXRX_OC
+        0x020d: SetCadParams, # LR11XX_RADIO_SET_CAD_PARAMS_OC
+        0x020e: SetPacketType, # LR11XX_RADIO_SET_PKT_TYPE_OC
+        0x020f: SetModulationParams, # LR11XX_RADIO_SET_MODULATION_PARAM_OC
+        0x0210: SetPacketParams, # LR11XX_RADIO_SET_PKT_PARAM_OC
+        0x0211: SetTxParams, # LR11XX_RADIO_SET_TX_PARAMS_OC
+        0x0212: SetPacketAdrs, # LR11XX_RADIO_SET_PKT_ADRS_OC
+        0x0213: SetRxTxFallbackMode, # LR11XX_RADIO_SET_RX_TX_FALLBACK_MODE_OC
+        0x0214: SetRxDutyCycle, # LR11XX_RADIO_SET_RX_DUTY_CYCLE_OC
+        0x0215: SetPaConfig, # LR11XX_RADIO_SET_PA_CFG_OC
+        0x0217: StopTimeoutOnPreamble, # LR11XX_RADIO_STOP_TIMEOUT_ON_PREAMBLE_OC
+        0x0218: SetCad, # LR11XX_RADIO_SET_CAD_OC
+        0x0219: SetTxCw, # LR11XX_RADIO_SET_TX_CW_OC
+        0x021a: SetTxInfinitePreamble, # LR11XX_RADIO_SET_TX_INFINITE_PREAMBLE_OC
+        0x021b: SetLoRaSynchTimeout, # LR11XX_RADIO_SET_LORA_SYNC_TIMEOUT_OC
+        0x021c: SetRangingAddr, # LR11XX_RTTOF_SET_ADDRESS
+        0x021d: SetRangingReqAddr, # LR11XX_RTTOF_SET_REQUEST_ADDRESS
+        0x021e: GetRangingResult, # LR11XX_RTTOF_GET_RESULT
+        0x021f: SetRangingTxRxDelay, # LR11XX_RTTOF_SET_RX_TX_DELAY
+        0x0222: GnssReadRssiTest, # LR11XX_GNSS_READ_GNSS_RSSI_TEST_OC
+        0x0224: SetGfskCrcParams, # LR11XX_RADIO_SET_GFSK_CRC_PARAMS_OC
+        0x0225: SetGfskWhiteningParams, # LR11XX_RADIO_SET_GFSK_WHITENING_PARAMS_OC
+        0x0227: SetRxBoosted, # LR11XX_RADIO_SET_RX_BOOSTED_OC
+        0x0228: SetRangingParameter, # LR11XX_RTTOF_SET_PARAMETERS
+        0x0229: SetRssiCalibration, # LR11XX_RADIO_SET_RSSI_CALIBRATION_OC
+        0x022b: SetLoraSyncWord, # LR11XX_RADIO_SET_LORA_SYNC_WORD_OC
+        0x022c: LrFhssBuildFrame, # LR11XX_LR_FHSS_BUILD_FRAME_OC
+        0x022d: LrFhssSetSyncWord, # LR11XX_RADIO_SET_LR_FHSS_SYNC_WORD_OC
+        0x022e: ConfigBleBeacon, # LR11XX_RADIO_CFG_BLUETOOTH_LOW_ENERGY_BEACONNING_COMPATIBILITY_OC
+        0x0230: GetLoRaRxHeaderInfos, # LR11XX_RADIO_GET_LORA_RX_INFO_OC
+        0x0231: BleBeaconSend, # LR11XX_RADIO_BLUETOOTH_LOW_ENERGY_BEACONNING_COMPATIBILITY_SEND_OC
+        0x0300: WifiScan, # LR11XX_WIFI_SCAN_OC
+        0x0301: WifiScanTimeLimit, # 
+        0x0302: WifiCountryCode, # LR11XX_WIFI_SEARCH_COUNTRY_CODE_OC
+        0x0303: WifiCountryCodeTimeLimit, # LR11XX_WIFI_COUNTRY_CODE_TIME_LIMIT_OC
+        0x0305: WifiGetNbResults, # LR11XX_WIFI_GET_RESULT_SIZE_OC
+        0x0306: WifiReadResults, # LR11XX_WIFI_READ_RESULT_OC
+        0x0307: WifiResetCumulTimings, # LR11XX_WIFI_RESET_CUMUL_TIMING_OC
+        0x0308: WifiReadCumulTimings, # LR11XX_WIFI_READ_CUMUL_TIMING_OC
+        0x0309: WifiGetNbCountryCodeResults, # LR11XX_WIFI_GET_SIZE_COUNTRY_RESULT_OC
+        0x030a: WifiReadCountryCodeResults, # LR11XX_WIFI_READ_COUNTRY_CODE_OC
+        0x030b: WifiCfgTimestampAPphone, # LR11XX_WIFI_CONFIGURE_TIMESTAMP_AP_PHONE_OC
+        0x0320: WifiReadVersion, # LR11XX_WIFI_GET_VERSION_OC
+        0x0400: GnssSetConstellationToUse, # LR11XX_GNSS_SET_CONSTELLATION_OC
+        0x0401: GnssReadConstellationToUse, # LR11XX_GNSS_READ_CONSTELLATION_OC
+        0x0402: GnssSetAlmanacUpdate, # LR11XX_GNSS_SET_ALMANAC_UPDATE_OC
+        0x0403: GnssReadAlmanacUpdate, # LR11XX_GNSS_READ_ALMANAC_UPDATE_OC
+        0x0404: GnssSetFreqSearchSpace, # LR11XX_GNSS_SET_FREQ_SEARCH_SPACE_OC
+        0x0405: GnssReadFreqSearchSpace, # LR11XX_GNSS_READ_FREQ_SEARCH_SPACE_OC
+        0x0406: GnssReadVersion, # LR11XX_GNSS_READ_FW_VERSION_OC
+        0x0407: GnssReadSupportedConstellations, # LR11XX_GNSS_READ_SUPPORTED_CONSTELLATION_OC
+        0x0408: GnssSetMode, # LR11XX_GNSS_SET_SCAN_MODE_OC
+        0x0409: GnssAutonomous, #
+        0x040a: GnssAssisted, #
+        0x040b: GnssScan, # LR11XX_GNSS_SCAN_OC
+        0x040c: GnssGetResultSize, # LR11XX_GNSS_SCAN_GET_RES_SIZE_OC
+        0x040d: GnssReadResults, # LR11XX_GNSS_SCAN_READ_RES_OC
+        0x040E: GnssAlmanacFullUpdate, # LR11XX_GNSS_ALMANAC_UPDATE_OC
+        0x040f: GnssAlmanacRead, # LR11XX_GNSS_ALMANAC_READ_OC
+        0x0410: GnssSetAssistancePosition, # LR11XX_GNSS_SET_ASSISTANCE_POSITION_OC
+        0x0411: GnssReadAssistancePosition, # LR11XX_GNSS_READ_ASSISTANCE_POSITION_OC
+        0x0414: GnssPushSolverMsg, # LR11XX_GNSS_PUSH_SOLVER_MSG_OC
+        0x0415: GnssPushDmMsg, # LR11XX_GNSS_PUSH_DM_MSG_OC
+        0x0416: GnssGetContextStatus, # LR11XX_GNSS_GET_CONTEXT_STATUS_OC
+        0x0417: GnssGetNbSvDetected, # LR11XX_GNSS_GET_NB_SATELLITES_OC
+        0x0418: GnssGetSvDetected, # LR11XX_GNSS_GET_SATELLITES_OC
+        0x041a: GnssReadAlmanacPerSatellite, # LR11XX_GNSS_READ_ALMANAC_PER_SATELLITE_OC
+        0x041f: GnssGetSvVisible, # LR11XX_GNSS_GET_SV_VISIBLE_OC
+        0x0420: GnssGetSvVisibleDoppler, # LR11XX_GNSS_GET_SV_VISIBLE_DOPPLER_OC
+        0x0426: GnssReadLastScanModeLaunched, # LR11XX_GNSS_READ_LAST_SCAN_MODE_LAUNCHED_OC
+        0x0432: GnssFetchTime, # LR11XX_GNSS_FETCH_TIME_OC
+        0x0434: GnssReadTime, # LR11XX_GNSS_READ_TIME_OC
+        0x0435: GnssResetTime, # LR11XX_GNSS_RESET_TIME_OC
+        0x0437: GnssResetPosition, # LR11XX_GNSS_RESET_POSITION_OC
+        0x0438: GnssReadWeekNumberRollover, # LR11XX_GNSS_READ_WEEK_NUMBER_ROLLOVER_OC
+        0x0439: GnssReadDemodStatus, # LR11XX_GNSS_READ_DEMOD_STATUS_OC
+        0x044a: GnssReadCumulTiming, # LR11XX_GNSS_READ_CUMULATIVE_TIMING_OC
+        0x044b: GnssSetTime, # LR11XX_GNSS_SET_TIME_OC
+        0x044d: GnssConfigDelayResetAP, # LR11XX_GNSS_CONFIG_DELAY_RESET_AP_OC
+        0x0453: GnssReadDelayResetAP, # LR11XX_GNSS_READ_DELAY_RESET_AP_OC
+        0x0456: GnssReadKeepSyncStatus, # LR11XX_GNSS_READ_KEEP_SYNC_STATUS_OC
+        0x0457: GnssReadAlmanacStatus, # LR11XX_GNSS_READ_ALMANAC_STATUS_OC
+        0x0463: GnssConfigAlmanacUpdatePeriod, # LR11XX_GNSS_CONFIG_ALMANAC_UPDATE_PERIOD_OC
+        0x0464: GnssReadAlmanacUpdatePeriod, # LR11XX_GNSS_READ_ALMANAC_UPDATE_PERIOD_OC
+        0x0466: GnssGetSvWarmStart, # LR11XX_GNSS_GET_SV_SYNC_OC
+
+# 0x0500: LR11XX_CRYPTO_SELECT_OC
+# 0x0502: LR11XX_CRYPTO_SET_KEY_OC
+# 0x0503: LR11XX_CRYPTO_DERIVE_KEY_OC
+# 0x0504: LR11XX_CRYPTO_PROCESS_JOIN_ACCEPT_OC
+# 0x0505: LR11XX_CRYPTO_COMPUTE_AES_CMAC_OC
+# 0x0506: LR11XX_CRYPTO_VERIFY_AES_CMAC_OC
+# 0x0507: LR11XX_CRYPTO_ENCRYPT_AES_01_OC
+# 0x0508: LR11XX_CRYPTO_ENCRYPT_AES_OC
+# 0x0509: LR11XX_CRYPTO_DECRYPT_AES_OC
+# 0x050A: LR11XX_CRYPTO_STORE_TO_FLASH_OC
+# 0x050B: LR11XX_CRYPTO_RESTORE_FROM_FLASH_OC
+# 0x050D: LR11XX_CRYPTO_SET_PARAMETER_OC
+# 0x050E: LR11XX_CRYPTO_GET_PARAMETER_OC
+# 0x050F: LR11XX_CRYPTO_CHECK_ENCRYPTED_FW_IMAGE_OC
+# 0x0510: LR11XX_CRYPTO_GET_CHECK_ENCRYPTED_FW_IMAGE_RESULT_OC
+
+        0x8000: EraseFlash, # LR11XX_BL_ERASE_FLASH_OC
+        0x8003: WriteFlashEncrypted, # LR11XX_BL_WRITE_FLASH_ENCRYPTED_OC
+# 0x8005: LR11XX_BL_REBOOT_OC
+        0x800b: GetPin, # LR11XX_BL_GET_PIN_OC
+        0x800c: ReadChipEui, # LR11XX_BL_READ_CHIP_EUI_OC
+        0x800d: ReadJoinEui, # LR11XX_BL_READ_JOIN_EUI_OC
     }
 
     def ResponseGetVersion(self):
@@ -1137,12 +1786,17 @@ class Hla(HighLevelAnalyzer):
     def ResponseReadRegMem32(self):
         return 'ReadRegMem32 ' + str(len(self.ba_miso)-1) + 'bytes'
 
+    def ResponseReadRegMem8(self):
+        return 'ReadRegMem8 ' + str(len(self.ba_miso)-1) + 'bytes'
+
     def ResponseReadBuffer8(self):
         return 'ReadBuffer8 ' + str(len(self.ba_miso)-1) + 'bytes'
 
     def ResponseGetErrors(self):
         errorStat = int.from_bytes(bytearray(self.ba_miso[1:2]), 'big')
-        _str = ''
+        _str = 'GetErrors '
+        if errorStat == 0:
+            return _str + ' no errors'
         if errorStat & 1:
             _str = _str + 'LF_RC_CALIB_ERR '
         if errorStat & 2:
@@ -1162,6 +1816,81 @@ class Hla(HighLevelAnalyzer):
         if errorStat & 0x100:
             _str = _str + 'RX_ADC_OFFSET_ERR '
         return _str
+
+    def ResponseGetVbat(self):
+        vbat = self.ba_miso[1]
+        volts = (((5*vbat)/255)-1)*1.35
+        _str = f"{volts:.2f}"
+        return 'GetVbat ' + _str + ' volts'
+
+    def ResponseGetTemp(self):
+        temp = int.from_bytes(bytearray(self.ba_miso[0:2]), 'big')
+        return 'GetTemp ' + hex(temp)
+
+    def ResponseGetRandomNumber(self):
+        rnd = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
+        return 'GetRandomNumber ' + str(rnd)
+
+    def ResponseReadInfoPage(self):
+        _len = len(self.ba_miso)
+        print('ReadInfoPage:')
+        for i in range(1, _len, 4):
+            val = int.from_bytes(bytearray(self.ba_miso[i:i+4]), 'big')
+            print(hex(val))
+        return 'ReadInfoPage (see terminal)'
+
+    def ResponseGetChipEui(self):
+        uid = int.from_bytes(bytearray(self.ba_miso[1:]), 'big')
+        _len = len(self.ba_miso)-1
+        _str = f'{uid:0{_len}x}'
+        return 'GetChipEui ' + _str
+
+    def ResponseGetSemtechJoinEui(self):
+        join_eui = int.from_bytes(bytearray(self.ba_miso[1:]), 'big')
+        _len = len(self.ba_miso)-1
+        _str = f'{join_eui:0{_len}x}'
+        return 'GetSemtechJoinEui ' + _str
+
+    def ResponseDeriveRootKeysAndGetPin(self):
+        pin = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
+        return 'DeriveRootKeysAndGetPin pin ' + hex(pin)
+
+    def ResponseGetPin(self):
+        pin = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
+        return 'GetPin pin ' + hex(pin)
+
+    def ResponseReadChipEui(self):
+        chip_eui = int.from_bytes(bytearray(self.ba_miso[1:9]), 'big')
+        _len = len(self.ba_miso)-1
+        _str = f'{chip_eui:0{_len*2}x}'
+        return 'ReadChipEui ' + _str
+
+    def ResponseReadJoinEui(self):
+        join_eui = int.from_bytes(bytearray(self.ba_miso[1:9]), 'big')
+        _len = len(self.ba_miso)-1
+        _str = f'{join_eui:0{_len*2}x}'
+        return 'ReadJoinEui ' + _str
+
+    def ResponseGetStats(self):
+        # TODO need to disable parseIrqs?
+        if self.pt == PacketType.FSK:
+            nb_pkt_received = int.from_bytes(bytearray(self.ba_miso[1:3]), 'big')
+            nb_pkt_crc_error = int.from_bytes(bytearray(self.ba_miso[3:5]), 'big')
+            nb_pkt_len_error = int.from_bytes(bytearray(self.ba_miso[5:7]), 'big')
+            _str = f'FSK nb_pkt_received={nb_pkt_received} nb_pkt_crc_error={nb_pkt_crc_error} nb_pkt_len_error={nb_pkt_len_error}'
+        elif self.pt == PacketType.LORA:
+            nb_pkt_received = int.from_bytes(bytearray(self.ba_miso[1:3]), 'big')
+            nb_pkt_crc_error = int.from_bytes(bytearray(self.ba_miso[3:5]), 'big')
+            nb_pkt_header_error = int.from_bytes(bytearray(self.ba_miso[5:7]), 'big')
+            nb_pkt_falsesync = int.from_bytes(bytearray(self.ba_miso[7:9]), 'big')
+            _str = f'LORA nb_pkt_received={nb_pkt_received} nb_pkt_crc_error={nb_pkt_crc_error} nb_pkt_header_error={nb_pkt_header_error} nb_pkt_falsesync={nb_pkt_falsesync}'
+        else:
+            _str = 'for unknown pktType:' + self.pt.name
+        return 'GetStats ' + _str
+
+    def ResponseGetPacketType(self):
+        self.pt = PacketType(self.ba_miso[1])
+        return 'GetPacketType ' + self.pt.name
 
     def ResponseGetRxBufferStatus(self):
         payLen = self.ba_miso[1]
@@ -1199,12 +1928,29 @@ class Hla(HighLevelAnalyzer):
                 SnrPkt = foo / 4
                 SignalRssiPkt = self.ba_miso[3] / -2
                 my_str = str(RssiPkt) + 'dBm ' + str(SnrPkt) + 'dB ' + str(SignalRssiPkt) + 'dBm'
-        else:
-            my_str = 'TODO pktType ' + str(self.pt)
+        else:  # only existing is get_get_lora_pkt_status() and get_gfsk_pkt_status()
+            my_str = 'pktType ' + str(self.pt)
         return 'GetPacketStatus ' + my_str
 
     def ResponseGetRssiInst(self):
         return 'GetRssiInst -' + str(self.ba_miso[1]/2) + 'dBm'
+
+    def ResponseGetRangingResult(self):
+        # LR11XX_RTTOF_RESULT_LENGTH = 4 bytes
+        result_type = getattr(self, 'ranging_result_type', None)
+        if result_type == 0:  # LR11XX_RTTOF_RESULT_TYPE_RAW
+            # Extract raw distance as 32-bit little-endian value
+            raw_distance = int.from_bytes(bytearray(self.ba_miso[1:5]), 'little')
+            return f'GetRangingResult RAW raw_distance=0x{raw_distance:08x}'
+        elif result_type == 1:  # LR11XX_RTTOF_RESULT_TYPE_RSSI
+            # Only byte 4 (index 4) is meaningful, shift right by 1 and negate
+            rssi_raw = self.ba_miso[4]
+            rssi_dbm = -(rssi_raw >> 1)
+            return f'GetRangingResult RSSI rssi={rssi_dbm} dBm'
+        else:
+            # Unknown type, just show raw bytes
+            raw_hex = ' '.join([f'{b:02x}' for b in self.ba_miso[1:5]])
+            return f'GetRangingResult type={result_type} data=[{raw_hex}]'
 
     def ResponseGetLoRaRxHeaderInfos(self):
         if self.ba_miso[1] & 0x10:
@@ -1221,6 +1967,15 @@ class Hla(HighLevelAnalyzer):
     def ResponseGnssReadResults(self):
         return 'GnssReadResults '
 
+    def ResponseGnssReadRssiTest(self):
+        rssi_gnss_dbm = int.from_bytes(bytearray(self.ba_miso[1:2]), 'big', signed=True)
+        return f'GnssReadRssiTest rssi={rssi_gnss_dbm} dBm'
+
+    def ResponseGnssAlmanacRead(self):
+        address = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
+        size = int.from_bytes(bytearray(self.ba_miso[5:7]), 'big')
+        return 'GnssAlmanacRead address ' + hex(address) + ', size ' + hex(size)
+
     def ResponseGnssReadAssistancePosition(self):
         _lat = int.from_bytes(bytearray(self.ba_miso[1:3]), 'big')
         lat = _lat / (2048/90)
@@ -1231,7 +1986,9 @@ class Hla(HighLevelAnalyzer):
         return 'assistance position ' + str(lat) + ', ' + str(lon)
 
     def ResponseGnssGetContextStatus(self):
-        return 'TODO GnssGetContextStatus response'
+        # lr11xx_gnss_context_status_bytestream_t
+        # uint8_t buffer of size LR11XX_GNSS_CONTEXT_STATUS_LENGTH 
+        return 'GnssGetContextStatus response'
 
     def ResponseGnssGetNbSvDetected(self):
         return 'GnssGetNbSvDetected ' + str(self.ba_miso[1])
@@ -1265,17 +2022,34 @@ class Hla(HighLevelAnalyzer):
     cmdResponseDict = {
         0x0101: ResponseGetVersion,
         0x0106: ResponseReadRegMem32,
+        0x0108: ResponseReadRegMem8,
         0x010a: ResponseReadBuffer8,
         0x010d: ResponseGetErrors,
+        0x0119: ResponseGetVbat,
+        0x011a: ResponseGetTemp,
+        0x0120: ResponseGetRandomNumber,
+        0x0123: ResponseReadInfoPage,
+        0x0125: ResponseGetChipEui,
+        0x0126: ResponseGetSemtechJoinEui,
+        0x0127: ResponseDeriveRootKeysAndGetPin,
+        0x800b: ResponseGetPin,
+        0x800c: ResponseReadChipEui,
+        0x800d: ResponseReadJoinEui,
+        0x0201: ResponseGetStats,
+        0x0202: ResponseGetPacketType,
         0x0203: ResponseGetRxBufferStatus,
         0x0204: ResponseGetPacketStatus,
         0x0205: ResponseGetRssiInst,
+        0x021e: ResponseGetRangingResult,
+        0x0222: ResponseGnssReadRssiTest,
         0x0230: ResponseGetLoRaRxHeaderInfos,
         0x0305: ResponseWifiGetNbResults,
         0x0306: ResponseWifiReadResults,
         0x0308: ResponseWifiReadCumulTimings,
+        0x0406: ResponseGnssReadVersion,
         0x040c: ResponseGnssGetResultSize,
         0x040d: ResponseGnssReadResults,
+        0x040f: ResponseGnssAlmanacRead,
         0x0411: ResponseGnssReadAssistancePosition,
         0x0416: ResponseGnssGetContextStatus,
         0x0417: ResponseGnssGetNbSvDetected,
@@ -1284,6 +2058,7 @@ class Hla(HighLevelAnalyzer):
         0x0434: ResponseGnssReadTime,
         0x044a: ResponseGnssReadCumulTiming,
         0x0457: ResponseGnssReadAlmanacStatus,
+        0x0466: ResponseGnssGetSvWarmStart,
     }
 
     result_types = {
@@ -1332,10 +2107,14 @@ class Hla(HighLevelAnalyzer):
                             else:
                                 my_str = type(self.ba_mosi).__name__ + ' xferLen' + str(len(self.ba_mosi)) + ', ' + str(frame.end_time - self.nss_fall_time)
                         else:
-                            my_str = hex(cmd) + ', error:' + str(error)
+                            my_str = hex(cmd) + ', dict-error:' + str(error)
                     half_status = 0
                 else:
-                    my_str = self.cmdResponseDict[self.cmd_direct_read](self)
+                    try:
+                        my_str = self.cmdResponseDict[self.cmd_direct_read](self)
+                    except Exception as error:
+                        my_str = hex(self.cmd_direct_read) + ', response-dict-error:' + str(error)
+
                     half_status = 1
                     self.cmd_direct_read = 0
 
