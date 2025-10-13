@@ -5,9 +5,13 @@
 from saleae.analyzers import HighLevelAnalyzer, AnalyzerFrame, StringSetting, NumberSetting, ChoicesSetting
 import ctypes
 from enum import Enum
+from lr_gnss import LrGnss
+from lr_wifi import LrWifi
 c_uint8 = ctypes.c_uint8
 c_uint32 = ctypes.c_uint32
 
+lr_gnss = LrGnss()
+lr_wifi = LrWifi()
 
 class PacketType(Enum): # lr11xx_radio_pkt_type_t
     NONE = 0
@@ -346,96 +350,6 @@ class Hla(HighLevelAnalyzer):
             return hex(f.asWord)
         else:
             return mystr
-
-    def SetPacketParams(self):
-        if self.pt == PacketType.FSK:
-            preambleLength = int.from_bytes(bytearray(self.ba_mosi[1:3]), 'big')
-            my_str = 'preamble TX ' + str(preambleLength)
-            detect = self.ba_mosi[3]
-            if detect == 0:
-                n_bits = 'OFF'
-            elif detect == 4:
-                n_bits = '8'
-            elif detect == 5:
-                n_bits = '16 '
-            elif detect == 6:
-                n_bits = '24'
-            elif detect == 7:
-                n_bits = '32'
-            else:
-                n_bits = '?'
-            my_str = my_str + ' detect ' + n_bits + 'bits '
-
-            syncWordBits = self.ba_mosi[4]
-            my_str = my_str + ' syncWord ' + str(syncWordBits) + 'bits '
-
-            addrComp = self.ba_mosi[5]
-            if addrComp == 0:
-                addrFilt = 'OFF'
-            elif addrComp == 1:
-                addrFilt = 'node'
-            elif addrComp == 2:
-                addrFilt = 'node & bcast'
-            else:
-                addrFilt = '?'
-            my_str = my_str + ' addrFilt ' + addrFilt
-
-            varLen = self.ba_mosi[6]
-            if varLen == 0:
-                my_str = my_str + ' fixLen'
-            else:
-                my_str = my_str + ' varLen'
-
-            payLen = self.ba_mosi[7]
-            my_str = my_str + ' payLen ' + str(payLen )
-
-            crcType = self.ba_mosi[8]
-            if crcType == 1:
-                crc = 'OFF'
-            elif crcType == 0:
-                crc = '1_BYTE'
-            elif crcType == 2:
-                crc = '2_BYTE'
-            elif crcType == 4:
-                crc = '1_BYTE_INV'
-            elif crcType == 6:
-                crc = '2_BYTE_INV'
-            else:
-                crc = hex(crcType)
-            my_str = my_str + ' CRC ' + str(crc)
-        elif self.pt == PacketType.LORA:
-            preambleLength = int.from_bytes(bytearray(self.ba_mosi[1:3]), 'big')
-            my_str = 'preamble ' + str(preambleLength)
-            headerType = self.ba_mosi[3]
-            if headerType == 0:
-                hdrStr = 'varLen'
-            elif headerType == 1:
-                hdrStr = 'fixrLen'
-            else:
-                hdrStr = hex(headerType)
-            my_str = my_str + ' header ' + hdrStr
-            payLen = self.ba_mosi[4]
-            my_str = my_str + ' payLen' + str(payLen)
-            crcOn = self.ba_mosi[5]
-            if crcOn == 0:
-                crcStr = 'ON'
-            elif crcOn == 1:
-                crcStr = 'OFF'
-            else:
-                crcStr = hex(crcOn)
-            my_str = my_str + ' CRC_' + crcStr
-            iqInv= self.ba_mosi[6]
-            if iqInv == 0:
-                iqStr = 'STD'
-            elif iqInv == 1:
-                iqStr = 'INV'
-            else:
-                iqStr = hex(iqInv)
-            my_str = my_str + ' IQ ' + iqStr
-        else:
-            my_str = 'TODO pktType ' + str(self.pt)
-
-        return 'SetPacketParams ' + my_str
 
     def GetRxBufferStatus(self):
         self.next_transfer_response = 1
@@ -1196,423 +1110,6 @@ class Hla(HighLevelAnalyzer):
         data_len = len(self.ba_mosi) - 3  # 2 byte opcode + 1 byte channel_id
         return 'BleBeaconSend channel=' + str(channel_id) + ', ' + str(data_len) + ' data bytes'
 
-    def gnss_scan(self, label):
-        time = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
-        effort = self.ba_mosi[6]
-        if effort == 0:
-            estr = 'lowPower'
-        elif effort == 1:
-            estr = 'bestEffort'
-        else:
-            estr = '?' + hex(effort) + '?'
-        resultMask = self.ba_mosi[7]
-        nbSvMax = self.ba_mosi[8]
-        return label + ' ' + str(time) + ' ' + estr + ' resultMask=' + hex(resultMask) + ' nbSvMax=' + str(nbSvMax)
-
-    def ResponseWifiReadResults(self):
-        result_format = getattr(self, 'wifi_result_format', None)
-        result_count = getattr(self, 'wifi_result_count', 0)
-
-        if result_format is None:
-            return 'WifiReadResults response ' + str(len(self.ba_miso) - 1) + ' bytes'
-
-        data_len = len(self.ba_miso) - 1  # Exclude stat1 byte
-        offset = 1  # Start after stat1
-
-        if result_format == 1:  # BASIC_COMPLETE
-            result_size = 22
-            _str = f'WifiReadResults {result_count} results (basic): '
-            for i in range(result_count):
-                if offset + result_size > len(self.ba_miso):
-                    break
-                rssi = self.ba_miso[offset + 2]
-                mac = ':'.join(f'{self.ba_miso[offset + 4 + j]:02x}' for j in range(6))
-                _str += f'[RSSI=-{rssi/2:.0f}dBm MAC={mac}] '
-                offset += result_size
-            return _str.rstrip()
-
-        elif result_format == 4:  # BASIC_MAC_TYPE_CHANNEL
-            result_size = 9
-            _str = f'WifiReadResults {result_count} results (mac/type/ch): '
-            for i in range(result_count):
-                if offset + result_size > len(self.ba_miso):
-                    break
-                channel = self.ba_miso[offset + 1] & 0x0F
-                rssi = self.ba_miso[offset + 2]
-                mac = ':'.join(f'{self.ba_miso[offset + 3 + j]:02x}' for j in range(6))
-                _str += f'[CH={channel} RSSI=-{rssi/2:.0f}dBm MAC={mac}] '
-                offset += result_size
-            return _str.rstrip()
-
-        else:
-            return f'WifiReadResults response format={result_format}, {data_len} bytes'
-
-    def WifiScan(self):
-        signal_type_dict = {
-            1: 'B',
-            2: 'G',
-            3: 'N',
-            4: 'B_G_N'
-        }
-        scan_mode_dict = {
-            1: 'BEACON',
-            2: 'BEACON_AND_PKT',
-            4: 'FULL_BEACON',
-            5: 'UNTIL_SSID'
-        }
-
-        signal_type = self.ba_mosi[2]
-        channels = int.from_bytes(bytearray(self.ba_mosi[3:5]), 'big')
-        scan_mode = self.ba_mosi[5]
-        max_results = self.ba_mosi[6]
-        nb_scan_per_channel = self.ba_mosi[7]
-        timeout_ms = int.from_bytes(bytearray(self.ba_mosi[8:10]), 'big')
-        abort_on_timeout = self.ba_mosi[10]
-
-        # Decode channel mask
-        channel_list = []
-        for i in range(14):
-            if channels & (1 << i):
-                channel_list.append(str(i + 1))
-        channels_str = ','.join(channel_list) if channel_list else 'none'
-
-        _str = 'WifiScan '
-        _str += signal_type_dict.get(signal_type, f'?{signal_type}?') + ' '
-        _str += f'ch:[{channels_str}] '
-        _str += scan_mode_dict.get(scan_mode, f'mode{scan_mode}') + ' '
-        _str += f'max:{max_results} '
-        _str += f'scans/ch:{nb_scan_per_channel} '
-        _str += f'timeout:{timeout_ms}ms '
-        _str += 'abort' if abort_on_timeout else 'no-abort'
-
-        return _str
-
-    def WifiScanTimeLimit(self):
-        signal_type_dict = {
-            1: 'B',
-            2: 'G',
-            3: 'N',
-            4: 'B_G_N'
-        }
-        scan_mode_dict = {
-            1: 'BEACON',
-            2: 'BEACON_AND_PKT',
-            4: 'FULL_BEACON',
-            5: 'UNTIL_SSID'
-        }
-
-        signal_type = self.ba_mosi[2]
-        channels = int.from_bytes(bytearray(self.ba_mosi[3:5]), 'big')
-        scan_mode = self.ba_mosi[5]
-        max_results = self.ba_mosi[6]
-        timeout_per_channel_ms = int.from_bytes(bytearray(self.ba_mosi[7:9]), 'big')
-        timeout_per_scan_ms = int.from_bytes(bytearray(self.ba_mosi[9:11]), 'big')
-
-        # Decode channel mask
-        channel_list = []
-        for i in range(14):
-            if channels & (1 << i):
-                channel_list.append(str(i + 1))
-        channels_str = ','.join(channel_list) if channel_list else 'none'
-
-        _str = 'WifiScanTimeLimit '
-        _str += signal_type_dict.get(signal_type, f'?{signal_type}?') + ' '
-        _str += f'ch:[{channels_str}] '
-        _str += scan_mode_dict.get(scan_mode, f'mode{scan_mode}') + ' '
-        _str += f'max:{max_results} '
-        _str += f'timeout/ch:{timeout_per_channel_ms}ms '
-        _str += f'timeout/scan:{timeout_per_scan_ms}ms'
-
-        return _str
-
-    def WifiCountryCodeTimeLimit(self):
-        return 'WifiCountryCodeTimeLimit TODO'
-
-    def WifiCountryCode(self):
-        return 'WifiCountryCode TODO'
-
-    def WifiCountryCodeTimeLimit(self):
-        return 'WifiCountryCodeTimeLimit TODO'
-
-    def WifiGetNbResults(self):
-        self.next_transfer_response = 1
-        return 'WifiGetNbResults'
-
-    def ResponseWifiGetNbResults(self):
-        return 'wifi NBresults:' + str(self.ba_miso[1])
-
-    def WifiReadResults(self):
-        _str = "index:" + str(self.ba_mosi[2])
-        _str = _str +  " NbResults:" + str(self.ba_mosi[3])
-        _format = self.ba_mosi[4]
-        self.wifi_result_format = _format
-        self.wifi_result_count = self.ba_mosi[3]
-        _str = _str + ' format:'
-        if _format == 1:
-            _str = _str + "basic"
-        elif _format == 4:
-            _str = _str + "mac/type/ch"
-        else:
-            _str = _str + hex(_format)
-        self.next_transfer_response = 1
-        return 'WifiReadResults ' + _str
-
-    def ResponseWifiReadCumulTimings(self):
-        if len(self.ba_miso) < 17:  # Need stat1 + 16 bytes of data
-            return 'WifiReadCumulTimings response (insufficient data)'
-
-        rx_detection_us = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
-        rx_correlation_us = int.from_bytes(bytearray(self.ba_miso[5:9]), 'big')
-        rx_capture_us = int.from_bytes(bytearray(self.ba_miso[9:13]), 'big')
-        demodulation_us = int.from_bytes(bytearray(self.ba_miso[13:17]), 'big')
-
-        total_us = rx_detection_us + rx_correlation_us + rx_capture_us + demodulation_us
-
-        _str = 'WifiReadCumulTimings: '
-        _str += f'detect={rx_detection_us}us '
-        _str += f'corr={rx_correlation_us}us '
-        _str += f'capt={rx_capture_us}us '
-        _str += f'demod={demodulation_us}us '
-        _str += f'total={total_us}us'
-
-        return _str
-
-    def ResponseGnssReadVersion(self):
-        gnss_firmware = self.ba_miso[1]
-        gnss_almanac = self.ba_miso[2]
-        return f'GnssReadVersion firmware=0x{gnss_firmware:02x} almanac=0x{gnss_almanac:02x}'
-
-    def WifiReadCumulTimings(self):
-        self.next_transfer_response = 1
-        return 'WifiReadCumulTimings'
-
-    def WifiGetNbCountryCodeResults(self):
-        return 'WifiGetNbCountryCodeResults TODO'
-
-    def WifiReadCountryCodeResults(self):
-        return 'WifiReadCountryCodeResults TODO'
-
-    def WifiCfgTimestampAPphone(self):
-        ts = int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big')
-        return 'WifiCfgTimestampAPphone ' + str(ts) + ' seconds'
-
-    def WifiReadVersion(self):
-        return 'WifiReadVersion TODO'
-
-    def WifiResetCumulTimings(self):
-        return 'WifiResetCumulTimings'
-
-    def GnssSetConstellationToUse(self):
-        bit_mask = self.ba_mosi[2]
-        _str = 'GnssSetConstellationToUse '
-        if bit_mask & 1:
-            _str = _str + 'GPS '
-        if bit_mask & 2:
-            _str = _str + 'BeiDou '
-        return _str
-
-    def GnssReadConstellationToUse(self):
-        return 'GnssReadConstellationToUse TODO'
-
-    def GnssSetAlmanacUpdate(self):
-        return 'GnssSetAlmanacUpdate TODO'
-
-    def GnssReadAlmanacUpdate(self):
-        return 'GnssReadAlmanacUpdate TODO'
-
-    def GnssSetFreqSearchSpace(self):
-        return 'GnssSetFreqSearchSpace TODO'
-
-    def GnssReadFreqSearchSpace(self):
-        return 'GnssReadFreqSearchSpace TODO'
-
-    def GnssReadVersion(self):
-        self.next_transfer_response = 1
-        return 'GnssReadVersion (request)'
-
-    def GnssReadSupportedConstellations(self):
-        return 'GnssReadSupportedConstellations TODO'
-
-    def GnssSetMode(self):
-        scan_mode_dict = {
-            0x00: 'SINGLE_SCAN_LEGACY',
-            0x03: 'SINGLE_SCAN_AND_5_FAST_SCANS'
-        }
-        scan_mode = self.ba_mosi[2]
-        scan_mode_str = scan_mode_dict.get(scan_mode, f'UNKNOWN_0x{scan_mode:02x}')
-        return f'GnssSetMode {scan_mode_str}'
-
-    def GnssAutonomous(self):
-        return self.gnss_scan('GnssAutonomous')
-
-    def GnssAssisted(self):
-        return self.gnss_scan('GnssAssisted')
-
-    def GnssScan(self):
-        effort = self.ba_mosi[2]
-        resultMask = self.ba_mosi[3]
-        NbSvMax = self.ba_mosi[4]
-        _str = 'effort '
-        if effort == 0:
-            _str = _str + 'low'
-        elif effort == 1:
-            _str = _str + 'middle'
-        else:
-            _str = _str + hex(effort)
-        _str = _str + ' resultMask:' + hex(resultMask)
-        _str = _str + ' NbSvMax:' + str(NbSvMax)
-        return 'GnssScan ' + _str
-
-    def GnssGetResultSize(self):
-        self.next_transfer_response = 1
-        return 'GnssGetResultSize'
-
-    def GnssSetAssistancePosition(self):
-        _lat = int.from_bytes(bytearray(self.ba_mosi[2:4]), 'big')
-        lat = _lat / (2048/90)
-        _lon = int.from_bytes(bytearray(self.ba_mosi[4:6]), 'big')
-        if _lon > 0x7fff:
-            _lon -= 0x10000
-        lon = _lon / (2048/180)
-        return 'GnssSetAssistancePosition ' + str(lat) + ', ' + str(lon)
-
-    def GnssReadAssistancePosition(self):
-        self.next_transfer_response = 1
-        return 'GnssReadAssistancePosition'
-
-    def GnssPushSolverMsg(self):
-        return 'GnssPushSolverMsg TODO'
-
-    def GnssPushDmMsg(self):
-        return 'GnssPushDmMsg TODO'
-
-    def GnssGetContextStatus(self):
-        self.next_transfer_response = 1
-        return 'GnssGetContextStatus'
-
-    def GnssGetNbSvDetected(self):
-        self.next_transfer_response = 1
-        return 'GnssGetNbSvDetected'
-
-    def GnssGetSvDetected(self):
-        self.next_transfer_response = 1
-        return 'GnssGetSvDetected'
-
-    def GnssReadAlmanacPerSatellite(self):
-        return 'GnssReadAlmanacPerSatellite TODO'
-
-    def GnssGetSvVisible(self):
-        return 'GnssGetSvVisible TODO'
-
-    def GnssGetSvVisibleDoppler(self):
-        return 'GnssGetSvVisibleDoppler TODO'
-
-    def GnssReadLastScanModeLaunched(self):
-        self.next_transfer_response = 1
-        return 'GnssReadLastScanModeLaunched'
-
-    def GnssFetchTime(self):
-        effort_mode_dict = {
-            0x00: 'LOW_EFFORT',
-            0x01: 'MID_EFFORT',
-            0x02: 'HIGH_EFFORT'
-        }
-        option_dict = {
-            0: 'SEARCH_TOW',
-            1: 'SEARCH_TOW_WN',
-            2: 'SEARCH_TOW_WN_ROLLOVER'
-        }
-        effort_mode = self.ba_mosi[2]
-        option = self.ba_mosi[3]
-        effort_str = effort_mode_dict.get(effort_mode, f'UNKNOWN_0x{effort_mode:02x}')
-        option_str = option_dict.get(option, f'UNKNOWN_0x{option:02x}')
-        return f'GnssFetchTime effort={effort_str} option={option_str}'
-
-    def ResponseGnssReadTime(self):
-        error_code_dict = {
-            0: 'NO_ERROR',
-            1: '32K_STOPPED',
-            2: 'WN_TOW_NOT_SET'
-        }
-        error_code = self.ba_miso[1]
-        gps_time_s = int.from_bytes(bytearray(self.ba_miso[2:6]), 'big')
-        nb_us_in_s_raw = int.from_bytes(bytearray(self.ba_miso[6:9]), 'big')
-        nb_us_in_s = nb_us_in_s_raw // 16
-        time_accuracy_raw = int.from_bytes(bytearray(self.ba_miso[9:13]), 'big')
-        time_accuracy = time_accuracy_raw // 16
-        error_str = error_code_dict.get(error_code, f'UNKNOWN_0x{error_code:02x}')
-        return f'GnssReadTime error={error_str} gps_time_s={gps_time_s} nb_us_in_s={nb_us_in_s} time_accuracy={time_accuracy}'
-
-    def ResponseGnssReadCumulTiming(self):
-        return 'GnssReadCumulTiming response'
-
-    def ResponseGnssReadAlmanacStatus(self):
-        return 'ReadAlmanacStatus response'
-
-    def ResponseGnssGetSvWarmStart(self):
-        n_SVs = len(self.ba_miso) - 1 # first byte is stat1
-        return 'GnssGetSvWarmStart ' + str(n_SVs) + ' SVs'
-
-    def GnssReadTime(self):
-        self.next_transfer_response = 1
-        return 'GnssReadTime'
-
-    def GnssResetTime(self):
-        return 'GnssResetTime TODO'
-
-    def GnssResetPosition(self):
-        return 'GnssResetPosition TODO'
-
-    def GnssReadWeekNumberRollover(self):
-        return 'GnssReadWeekNumberRollover TODO'
-
-    def GnssReadDemodStatus(self):
-        return 'GnssReadDemodStatus TODO'
-
-    def GnssReadCumulTiming(self):
-        self.next_transfer_response = 1
-        return 'GnssReadCumulTiming'
-
-    def GnssSetTime(self):
-        return 'GnssSetTime TODO'
-
-    def GnssConfigDelayResetAP(self):
-        return 'GnssConfigDelayResetAP TODO'
-
-    def GnssReadDelayResetAP(self):
-        return 'GnssReadDelayResetAP TODO'
-
-    def GnssReadKeepSyncStatus(self):
-        return 'GnssReadKeepSyncStatus TODO'
-
-    def GnssReadAlmanacStatus(self):
-        self.next_transfer_response = 1
-        return 'GnssReadAlmanacStatus '
-
-    def GnssConfigAlmanacUpdatePeriod(self):
-        return 'GnssConfigAlmanacUpdatePeriod TODO'
-
-    def GnssReadAlmanacUpdatePeriod(self):
-        return 'GnssReadAlmanacUpdatePeriod TODO'
-
-    def GnssGetSvWarmStart(self):
-        self.next_transfer_response = 1
-        constellation_mask = self.ba_mosi[2]
-        return 'GnssGetSvWarmStart constellation_mask ' + str(constellation_mask)
-
-    def GnssReadResults(self):
-        self.next_transfer_response = 1
-        return 'GnssReadResults'
-
-    def GnssAlmanacFullUpdate(self):
-        _len = len(self.ba_mosi) - 2
-        block_size = 20
-        return 'GnssAlmanacFullUpdate _len ' + str(_len) + ', blocks ' + str(_len/block_size)
-
-    def GnssAlmanacRead(self):
-        self.next_transfer_response = 1
-        return 'GnssAlmanacRead (request)'
-
     cmdDict = {
         0x0100: GetStatus, # LR11XX_BL_GET_STATUS_OC, LR11XX_SYSTEM_GET_STATUS_OC
         0x0101: GetVersion, # LR11XX_BL_GET_VERSION_OC, LR11XX_SYSTEM_GET_VERSION_OC
@@ -1691,60 +1188,8 @@ class Hla(HighLevelAnalyzer):
         0x022e: ConfigBleBeacon, # LR11XX_RADIO_CFG_BLUETOOTH_LOW_ENERGY_BEACONNING_COMPATIBILITY_OC
         0x0230: GetLoRaRxHeaderInfos, # LR11XX_RADIO_GET_LORA_RX_INFO_OC
         0x0231: BleBeaconSend, # LR11XX_RADIO_BLUETOOTH_LOW_ENERGY_BEACONNING_COMPATIBILITY_SEND_OC
-        0x0300: WifiScan, # LR11XX_WIFI_SCAN_OC
-        0x0301: WifiScanTimeLimit, # 
-        0x0302: WifiCountryCode, # LR11XX_WIFI_SEARCH_COUNTRY_CODE_OC
-        0x0303: WifiCountryCodeTimeLimit, # LR11XX_WIFI_COUNTRY_CODE_TIME_LIMIT_OC
-        0x0305: WifiGetNbResults, # LR11XX_WIFI_GET_RESULT_SIZE_OC
-        0x0306: WifiReadResults, # LR11XX_WIFI_READ_RESULT_OC
-        0x0307: WifiResetCumulTimings, # LR11XX_WIFI_RESET_CUMUL_TIMING_OC
-        0x0308: WifiReadCumulTimings, # LR11XX_WIFI_READ_CUMUL_TIMING_OC
-        0x0309: WifiGetNbCountryCodeResults, # LR11XX_WIFI_GET_SIZE_COUNTRY_RESULT_OC
-        0x030a: WifiReadCountryCodeResults, # LR11XX_WIFI_READ_COUNTRY_CODE_OC
-        0x030b: WifiCfgTimestampAPphone, # LR11XX_WIFI_CONFIGURE_TIMESTAMP_AP_PHONE_OC
-        0x0320: WifiReadVersion, # LR11XX_WIFI_GET_VERSION_OC
-        0x0400: GnssSetConstellationToUse, # LR11XX_GNSS_SET_CONSTELLATION_OC
-        0x0401: GnssReadConstellationToUse, # LR11XX_GNSS_READ_CONSTELLATION_OC
-        0x0402: GnssSetAlmanacUpdate, # LR11XX_GNSS_SET_ALMANAC_UPDATE_OC
-        0x0403: GnssReadAlmanacUpdate, # LR11XX_GNSS_READ_ALMANAC_UPDATE_OC
-        0x0404: GnssSetFreqSearchSpace, # LR11XX_GNSS_SET_FREQ_SEARCH_SPACE_OC
-        0x0405: GnssReadFreqSearchSpace, # LR11XX_GNSS_READ_FREQ_SEARCH_SPACE_OC
-        0x0406: GnssReadVersion, # LR11XX_GNSS_READ_FW_VERSION_OC
-        0x0407: GnssReadSupportedConstellations, # LR11XX_GNSS_READ_SUPPORTED_CONSTELLATION_OC
-        0x0408: GnssSetMode, # LR11XX_GNSS_SET_SCAN_MODE_OC
-        0x0409: GnssAutonomous, #
-        0x040a: GnssAssisted, #
-        0x040b: GnssScan, # LR11XX_GNSS_SCAN_OC
-        0x040c: GnssGetResultSize, # LR11XX_GNSS_SCAN_GET_RES_SIZE_OC
-        0x040d: GnssReadResults, # LR11XX_GNSS_SCAN_READ_RES_OC
-        0x040E: GnssAlmanacFullUpdate, # LR11XX_GNSS_ALMANAC_UPDATE_OC
-        0x040f: GnssAlmanacRead, # LR11XX_GNSS_ALMANAC_READ_OC
-        0x0410: GnssSetAssistancePosition, # LR11XX_GNSS_SET_ASSISTANCE_POSITION_OC
-        0x0411: GnssReadAssistancePosition, # LR11XX_GNSS_READ_ASSISTANCE_POSITION_OC
-        0x0414: GnssPushSolverMsg, # LR11XX_GNSS_PUSH_SOLVER_MSG_OC
-        0x0415: GnssPushDmMsg, # LR11XX_GNSS_PUSH_DM_MSG_OC
-        0x0416: GnssGetContextStatus, # LR11XX_GNSS_GET_CONTEXT_STATUS_OC
-        0x0417: GnssGetNbSvDetected, # LR11XX_GNSS_GET_NB_SATELLITES_OC
-        0x0418: GnssGetSvDetected, # LR11XX_GNSS_GET_SATELLITES_OC
-        0x041a: GnssReadAlmanacPerSatellite, # LR11XX_GNSS_READ_ALMANAC_PER_SATELLITE_OC
-        0x041f: GnssGetSvVisible, # LR11XX_GNSS_GET_SV_VISIBLE_OC
-        0x0420: GnssGetSvVisibleDoppler, # LR11XX_GNSS_GET_SV_VISIBLE_DOPPLER_OC
-        0x0426: GnssReadLastScanModeLaunched, # LR11XX_GNSS_READ_LAST_SCAN_MODE_LAUNCHED_OC
-        0x0432: GnssFetchTime, # LR11XX_GNSS_FETCH_TIME_OC
-        0x0434: GnssReadTime, # LR11XX_GNSS_READ_TIME_OC
-        0x0435: GnssResetTime, # LR11XX_GNSS_RESET_TIME_OC
-        0x0437: GnssResetPosition, # LR11XX_GNSS_RESET_POSITION_OC
-        0x0438: GnssReadWeekNumberRollover, # LR11XX_GNSS_READ_WEEK_NUMBER_ROLLOVER_OC
-        0x0439: GnssReadDemodStatus, # LR11XX_GNSS_READ_DEMOD_STATUS_OC
-        0x044a: GnssReadCumulTiming, # LR11XX_GNSS_READ_CUMULATIVE_TIMING_OC
-        0x044b: GnssSetTime, # LR11XX_GNSS_SET_TIME_OC
-        0x044d: GnssConfigDelayResetAP, # LR11XX_GNSS_CONFIG_DELAY_RESET_AP_OC
-        0x0453: GnssReadDelayResetAP, # LR11XX_GNSS_READ_DELAY_RESET_AP_OC
-        0x0456: GnssReadKeepSyncStatus, # LR11XX_GNSS_READ_KEEP_SYNC_STATUS_OC
-        0x0457: GnssReadAlmanacStatus, # LR11XX_GNSS_READ_ALMANAC_STATUS_OC
-        0x0463: GnssConfigAlmanacUpdatePeriod, # LR11XX_GNSS_CONFIG_ALMANAC_UPDATE_PERIOD_OC
-        0x0464: GnssReadAlmanacUpdatePeriod, # LR11XX_GNSS_READ_ALMANAC_UPDATE_PERIOD_OC
-        0x0466: GnssGetSvWarmStart, # LR11XX_GNSS_GET_SV_SYNC_OC
+        #0x03xx was here, moved to LrWifi
+        #0x04xx was here, moved to LrGnss
 
 # 0x0500: LR11XX_CRYPTO_SELECT_OC
 # 0x0502: LR11XX_CRYPTO_SET_KEY_OC
@@ -1899,11 +1344,12 @@ class Hla(HighLevelAnalyzer):
 
     def ResponseGetPacketStatus(self):
         if self.pt == PacketType.FSK:
+            # GFSK packet status: 4 bytes [rssi_sync, rssi_avg, rx_len, status]
             rxStatus = RxStatus()
-            rxStatus.asWord = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
+            rxStatus.asWord = int.from_bytes(bytearray(self.ba_miso[1:5]), 'little')
             my_str = str(rxStatus.RxLen) + 'bytes '
-            rssiAvg = rxStatus.RssiAvg
-            rssiSync = rxStatus.RssiSync
+            rssiAvg = rxStatus.RssiAvg >> 1
+            rssiSync = rxStatus.RssiSync >> 1
             my_str = my_str + '-' + str(rssiAvg) + 'dBm '
             my_str = my_str + '-' + str(rssiSync) + 'dBm '
             if rxStatus.PktSent == 1:
@@ -1920,14 +1366,18 @@ class Hla(HighLevelAnalyzer):
                 my_str = my_str + 'Adrserr '
             if rxStatus.rfu != 0:
                 my_str = my_str + 'rfu '
-            elif self.pt == PacketType.LORA:
-                RssiPkt = self.ba_miso[1] / -2
-                foo = self.ba_miso[2] / 4
-                if foo > 127:
-                    foo -= 256
-                SnrPkt = foo / 4
-                SignalRssiPkt = self.ba_miso[3] / -2
-                my_str = str(RssiPkt) + 'dBm ' + str(SnrPkt) + 'dB ' + str(SignalRssiPkt) + 'dBm'
+        elif self.pt == PacketType.LORA:
+            # LoRa packet status: 3 bytes [rssi_pkt, snr_pkt, signal_rssi_pkt]
+            # rssi_pkt_in_dbm = -(rbuffer[0] >> 1)
+            RssiPkt = -(self.ba_miso[1] >> 1)
+            # snr_pkt_in_db = ((rbuffer[1] + 2) >> 2) - signed 8-bit
+            snr_raw = self.ba_miso[2]
+            if snr_raw > 127:
+                snr_raw -= 256
+            SnrPkt = (snr_raw + 2) >> 2
+            # signal_rssi_pkt_in_dbm = -(rbuffer[2] >> 1)
+            SignalRssiPkt = -(self.ba_miso[3] >> 1)
+            my_str = str(RssiPkt) + 'dBm ' + str(SnrPkt) + 'dB ' + str(SignalRssiPkt) + 'dBm'
         else:  # only existing is get_get_lora_pkt_status() and get_gfsk_pkt_status()
             my_str = 'pktType ' + str(self.pt)
         return 'GetPacketStatus ' + my_str
@@ -1961,63 +1411,9 @@ class Hla(HighLevelAnalyzer):
         my_str = my_str + ' ' + str(self.crs[cr]) + ' '
         return 'GetLoRaRxHeaderInfos ' + my_str
 
-    def ResponseGnssGetResultSize(self):
-        return 'GetResultSize ' + str(int.from_bytes(bytearray(self.ba_miso[1:3]), 'big'))
-
-    def ResponseGnssReadResults(self):
-        return 'GnssReadResults '
-
     def ResponseGnssReadRssiTest(self):
         rssi_gnss_dbm = int.from_bytes(bytearray(self.ba_miso[1:2]), 'big', signed=True)
         return f'GnssReadRssiTest rssi={rssi_gnss_dbm} dBm'
-
-    def ResponseGnssAlmanacRead(self):
-        address = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
-        size = int.from_bytes(bytearray(self.ba_miso[5:7]), 'big')
-        return 'GnssAlmanacRead address ' + hex(address) + ', size ' + hex(size)
-
-    def ResponseGnssReadAssistancePosition(self):
-        _lat = int.from_bytes(bytearray(self.ba_miso[1:3]), 'big')
-        lat = _lat / (2048/90)
-        _lon = int.from_bytes(bytearray(self.ba_miso[3:5]), 'big')
-        if _lon > 0x7fff:
-            _lon -= 0x10000
-        lon = _lon / (2048/180)
-        return 'assistance position ' + str(lat) + ', ' + str(lon)
-
-    def ResponseGnssGetContextStatus(self):
-        # lr11xx_gnss_context_status_bytestream_t
-        # uint8_t buffer of size LR11XX_GNSS_CONTEXT_STATUS_LENGTH 
-        return 'GnssGetContextStatus response'
-
-    def ResponseGnssGetNbSvDetected(self):
-        return 'GnssGetNbSvDetected ' + str(self.ba_miso[1])
-
-    def ResponseGnssReadLastScanModeLaunched(self):
-        lsm = self.ba_miso[1]
-        _str = 'last scan mode: '
-        if lsm == 3:
-            _str = _str + 'assisted'
-        elif lsm == 4:
-            _str = _str + 'cold start, no time'
-        elif lsm == 5:
-            _str = _str + 'cold start, with time'
-        elif lsm == 6:
-            _str = _str + 'fetchtime or 2d'
-        elif lsm == 7:
-            _str = _str + 'almanac update command, no save'
-        elif lsm == 8:
-            _str = _str + 'keep sync'
-        elif lsm == 9:
-            _str = _str + 'almanac update command, 1 saved'
-        elif lsm == 10:
-            _str = _str + 'almanac update command, 2 saved'
-        else:
-            _str = _str + '0x'+hex(lsm)
-        return _str
-
-    def ResponseGnssGetSvDetected(self):
-        return 'GnssGetSvDetected '
 
     cmdResponseDict = {
         0x0101: ResponseGetVersion,
@@ -2043,22 +1439,6 @@ class Hla(HighLevelAnalyzer):
         0x021e: ResponseGetRangingResult,
         0x0222: ResponseGnssReadRssiTest,
         0x0230: ResponseGetLoRaRxHeaderInfos,
-        0x0305: ResponseWifiGetNbResults,
-        0x0306: ResponseWifiReadResults,
-        0x0308: ResponseWifiReadCumulTimings,
-        0x0406: ResponseGnssReadVersion,
-        0x040c: ResponseGnssGetResultSize,
-        0x040d: ResponseGnssReadResults,
-        0x040f: ResponseGnssAlmanacRead,
-        0x0411: ResponseGnssReadAssistancePosition,
-        0x0416: ResponseGnssGetContextStatus,
-        0x0417: ResponseGnssGetNbSvDetected,
-        0x0418: ResponseGnssGetSvDetected,
-        0x0426: ResponseGnssReadLastScanModeLaunched,
-        0x0434: ResponseGnssReadTime,
-        0x044a: ResponseGnssReadCumulTiming,
-        0x0457: ResponseGnssReadAlmanacStatus,
-        0x0466: ResponseGnssGetSvWarmStart,
     }
 
     result_types = {
@@ -2094,7 +1474,12 @@ class Hla(HighLevelAnalyzer):
                 if self.cmd_direct_read == 0:
                     try:
                         cmd = int.from_bytes(bytearray(self.ba_mosi[0:2]), 'big')
-                        my_str = self.cmdDict[cmd](self)
+                        if self.ba_mosi[0] == 0x04:
+                            my_str = lr_gnss.cmdDict[cmd](self)
+                        elif self.ba_mosi[0] == 0x04:
+                            my_str = lr_wifi.cmdDict[cmd](self)
+                        else:
+                            my_str = self.cmdDict[cmd](self)
                         if self.next_transfer_response == 1:
                             self.cmd_direct_read = cmd  # save it for later
                             self.next_transfer_response = 0
@@ -2111,7 +1496,12 @@ class Hla(HighLevelAnalyzer):
                     half_status = 0
                 else:
                     try:
-                        my_str = self.cmdResponseDict[self.cmd_direct_read](self)
+                        if (self.cmd_direct_read >> 8) == 0x04:
+                            my_str = lr_gnss.cmdResponseDict[self.cmd_direct_read](self)
+                        elif (self.cmd_direct_read >> 8) == 0x03:
+                            my_str = lr_wifi.cmdResponseDict[self.cmd_direct_read](self)
+                        else:
+                            my_str = self.cmdResponseDict[self.cmd_direct_read](self)
                     except Exception as error:
                         my_str = hex(self.cmd_direct_read) + ', response-dict-error:' + str(error)
 
