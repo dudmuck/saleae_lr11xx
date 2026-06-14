@@ -514,6 +514,69 @@ class LrGnss:
         self.next_transfer_response = 1
         return 'GnssReadDelayResetAP'
 
+    def GnssAlmanacUpdateFromSat(self):
+        # cmd: opcode + effort_mode (1 byte) + constellation_mask (1 byte)
+        effort_mode = self.ba_mosi[2]
+        constellation_mask = self.ba_mosi[3]
+
+        effort_dict = {
+            0x00: 'LOW_EFFORT',
+            0x01: 'MID_EFFORT',
+            0x02: 'HIGH_EFFORT',
+        }
+        effort_str = effort_dict.get(effort_mode, f'UNKNOWN_0x{effort_mode:02x}')
+
+        constellation_strs = []
+        if constellation_mask & 0x01:
+            constellation_strs.append('GPS')
+        if constellation_mask & 0x02:
+            constellation_strs.append('BeiDou')
+        constellation_str = ','.join(constellation_strs) if constellation_strs else f'0x{constellation_mask:02x}'
+
+        return f'GnssAlmanacUpdateFromSat effort={effort_str} constellation={constellation_str}'
+
+    def ResponseGnssReadDopplerSolverResult(self):
+        if len(self.ba_miso) < 19:  # stat1 + 18 bytes
+            return 'GnssReadDopplerSolverResult (insufficient data)'
+
+        error_dict = {
+            0: 'NO_ERROR',
+            1: 'RESIDUE_HIGH',
+            2: 'NOT_CONVERGED',
+            3: 'NOT_ENOUGH_SV',
+            4: 'ILL_MATRIX',
+            5: 'TIME_ERROR',
+            6: 'PARTIAL_ALMANAC_TOO_OLD',
+            7: 'NOT_CONSISTENT_WITH_HISTORY',
+            8: 'ALL_ALMANAC_TOO_OLD',
+        }
+
+        def s16(hi, lo):
+            v = (self.ba_miso[hi] << 8) | self.ba_miso[lo]
+            return v - 0x10000 if v > 0x7fff else v
+
+        error_code = self.ba_miso[1]
+        error_str = error_dict.get(error_code, f'UNKNOWN_0x{error_code:02x}')
+        nb_sv_used = self.ba_miso[2]
+
+        one_shot_lat = s16(3, 4) / (2048 / 90)
+        one_shot_lon = s16(5, 6) / (2048 / 180)
+        one_shot_accuracy = int.from_bytes(bytearray(self.ba_miso[7:9]), 'big')
+        one_shot_xtal_ppb = s16(9, 10)
+        filtered_lat = s16(11, 12) / (2048 / 90)
+        filtered_lon = s16(13, 14) / (2048 / 180)
+        filtered_accuracy = int.from_bytes(bytearray(self.ba_miso[15:17]), 'big')
+        filtered_xtal_ppb = s16(17, 18)
+
+        _str = f'GnssReadDopplerSolverResult: error={error_str} nb_sv_used={nb_sv_used} '
+        _str += f'one_shot[lat={one_shot_lat:.4f} lon={one_shot_lon:.4f} acc={one_shot_accuracy} xtal={one_shot_xtal_ppb}ppb] '
+        _str += f'filtered[lat={filtered_lat:.4f} lon={filtered_lon:.4f} acc={filtered_accuracy} xtal={filtered_xtal_ppb}ppb]'
+        return _str
+
+    def GnssReadDopplerSolverResult(self):
+        self.next_transfer_response = 1
+        return 'GnssReadDopplerSolverResult'
+
     def ResponseGnssReadKeepSyncStatus(self):
         if len(self.ba_miso) < 6:  # Need stat1 + 5 bytes
             return 'GnssReadKeepSyncStatus (insufficient data)'
@@ -651,6 +714,7 @@ class LrGnss:
         0x0438: ResponseGnssReadWeekNumberRollover,
         0x0439: ResponseGnssReadDemodStatus,
         0x044a: ResponseGnssReadCumulTiming,
+        0x044f: ResponseGnssReadDopplerSolverResult,
         0x0453: ResponseGnssReadDelayResetAP,
         0x0456: ResponseGnssReadKeepSyncStatus,
         0x0457: ResponseGnssReadAlmanacStatus,
@@ -695,7 +759,9 @@ class LrGnss:
         0x044a: GnssReadCumulTiming, # LR11XX_GNSS_READ_CUMULATIVE_TIMING_OC
         0x044b: GnssSetTime, # LR11XX_GNSS_SET_TIME_OC
         0x044d: GnssConfigDelayResetAP, # LR11XX_GNSS_CONFIG_DELAY_RESET_AP_OC
+        0x044f: GnssReadDopplerSolverResult, # LR11XX_GNSS_READ_DOPPLER_SOLVER_RESULT_OC
         0x0453: GnssReadDelayResetAP, # LR11XX_GNSS_READ_DELAY_RESET_AP_OC
+        0x0454: GnssAlmanacUpdateFromSat, # LR11XX_GNSS_ALMANAC_UPDATE_FROM_SAT_OC
         0x0456: GnssReadKeepSyncStatus, # LR11XX_GNSS_READ_KEEP_SYNC_STATUS_OC
         0x0457: GnssReadAlmanacStatus, # LR11XX_GNSS_READ_ALMANAC_STATUS_OC
         0x0463: GnssConfigAlmanacUpdatePeriod, # LR11XX_GNSS_CONFIG_ALMANAC_UPDATE_PERIOD_OC

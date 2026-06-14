@@ -1476,7 +1476,7 @@ class Hla(HighLevelAnalyzer):
                         cmd = int.from_bytes(bytearray(self.ba_mosi[0:2]), 'big')
                         if self.ba_mosi[0] == 0x04:
                             my_str = lr_gnss.cmdDict[cmd](self)
-                        elif self.ba_mosi[0] == 0x04:
+                        elif self.ba_mosi[0] == 0x03:
                             my_str = lr_wifi.cmdDict[cmd](self)
                         else:
                             my_str = self.cmdDict[cmd](self)
