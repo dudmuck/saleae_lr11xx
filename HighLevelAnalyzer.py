@@ -4,14 +4,17 @@
 
 from saleae.analyzers import HighLevelAnalyzer, AnalyzerFrame, StringSetting, NumberSetting, ChoicesSetting
 import ctypes
+import os
 from enum import Enum
 from lr_gnss import LrGnss
 from lr_wifi import LrWifi
+from lr_modem_e import LrModemE, modem_e_rc_readback, modem_e_rc_crc_ok, modem_e_resp_crc_note, modem_e_orphan_read, crc8 as modem_e_crc8, rcDict as modem_e_rc_dict
 c_uint8 = ctypes.c_uint8
 c_uint32 = ctypes.c_uint32
 
 lr_gnss = LrGnss()
 lr_wifi = LrWifi()
+lr_modem_e = LrModemE()
 
 class PacketType(Enum): # lr11xx_radio_pkt_type_t
     NONE = 0
@@ -515,6 +518,17 @@ class Hla(HighLevelAnalyzer):
     def ClearIrq(self):
         return 'ClearIrq ' + self.parseIrqs(int.from_bytes(bytearray(self.ba_mosi[2:6]), 'big'))
 
+    def GetIrqStatus(self):
+        self.next_transfer_response = 1
+        return 'GetIrqStatus (request)'
+
+    def ResponseGetIrqStatus(self):
+        # MODEM_E_SYSTEM_GET_IRQ_OC response is modem-e framed: [RC, irq31..0, CRC]
+        if self.ba_miso[0] != 0 and modem_e_rc_crc_ok(self.ba_miso):
+            # error frame: only [RC, CRC] are valid, no IRQ data follows
+            return 'GetIrqStatus RC=' + modem_e_rc_dict.get(self.ba_miso[0], hex(self.ba_miso[0]) + '?')
+        return 'GetIrqStatus ' + self.parseIrqs(int.from_bytes(bytearray(self.ba_miso[1:5]), 'big'))
+
     def CalibImage(self):
         freq1 = self.ba_mosi[2]
         if freq1 == 0x6b:
@@ -583,14 +597,20 @@ class Hla(HighLevelAnalyzer):
         volts = self.tuneDict[tune]
         return 'SetTcxoMode ' + str(volts) + 'v %.3f' % (delay * 0.03052) + 'ms'
 
-    def Reboot(self):
+    def _reboot_str(self, name):
         stay_in_bootloader = self.ba_mosi[2]
         _str = ''
         if stay_in_bootloader == 3:
             _str = 'stay_in_bootloader'
         elif stay_in_bootloader != 0:
             _str = hex(stay_in_bootloader) + '?'
-        return 'Reboot ' + _str
+        return name + ' ' + _str
+
+    def Reboot(self):
+        return self._reboot_str('Reboot')
+
+    def BootloaderReboot(self):
+        return self._reboot_str('BootloaderReboot')
 
     def GetVbat(self):
         self.next_transfer_response = 1
@@ -637,6 +657,10 @@ class Hla(HighLevelAnalyzer):
         length_bytes = len(self.ba_mosi) - 6
         length_words = length_bytes // 4
         return f'WriteFlashEncrypted offset=0x{offset:08x} length={length_words} words ({length_bytes} bytes)'
+
+    def GetHash(self):
+        self.next_transfer_response = 1
+        return 'GetHash (request)'
 
     def GetPin(self):
         self.next_transfer_response = 1
@@ -1129,6 +1153,7 @@ class Hla(HighLevelAnalyzer):
         0x0112: SetDioAsRfSwitch, # LR11XX_SYSTEM_SET_DIO_AS_RF_SWITCH_OC
         0x0113: SetDioIrqParams, # LR11XX_SYSTEM_SET_DIOIRQPARAMS_OC
         0x0114: ClearIrq, # LR11XX_SYSTEM_CLEAR_IRQ_OC
+        0x0115: GetIrqStatus, # MODEM_E_SYSTEM_GET_IRQ_OC (modem-e firmware only)
         0x0116: ConfigLfClock, # LR11XX_SYSTEM_CFG_LFCLK_OC
         0x0117: SetTcxoMode, # LR11XX_SYSTEM_SET_TCXO_MODE_OC
         0x0118: Reboot, # LR11XX_SYSTEM_REBOOT_OC
@@ -1209,7 +1234,8 @@ class Hla(HighLevelAnalyzer):
 
         0x8000: EraseFlash, # LR11XX_BL_ERASE_FLASH_OC
         0x8003: WriteFlashEncrypted, # LR11XX_BL_WRITE_FLASH_ENCRYPTED_OC
-# 0x8005: LR11XX_BL_REBOOT_OC
+        0x8004: GetHash, # LR11XX_BL_GET_HASH_OC
+        0x8005: BootloaderReboot, # LR11XX_BL_REBOOT_OC
         0x800b: GetPin, # LR11XX_BL_GET_PIN_OC
         0x800c: ReadChipEui, # LR11XX_BL_READ_CHIP_EUI_OC
         0x800d: ReadJoinEui, # LR11XX_BL_READ_JOIN_EUI_OC
@@ -1299,6 +1325,11 @@ class Hla(HighLevelAnalyzer):
     def ResponseDeriveRootKeysAndGetPin(self):
         pin = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
         return 'DeriveRootKeysAndGetPin pin ' + hex(pin)
+
+    def ResponseGetHash(self):
+        # 16-byte hash of flash content (LR11XX_BL_HASH_LENGTH)
+        hash_bytes = bytearray(self.ba_miso[1:17])
+        return 'GetHash ' + hash_bytes.hex()
 
     def ResponseGetPin(self):
         pin = int.from_bytes(bytearray(self.ba_miso[1:5]), 'big')
@@ -1421,6 +1452,7 @@ class Hla(HighLevelAnalyzer):
         0x0108: ResponseReadRegMem8,
         0x010a: ResponseReadBuffer8,
         0x010d: ResponseGetErrors,
+        0x0115: ResponseGetIrqStatus, # MODEM_E_SYSTEM_GET_IRQ_OC (modem-e firmware only)
         0x0119: ResponseGetVbat,
         0x011a: ResponseGetTemp,
         0x0120: ResponseGetRandomNumber,
@@ -1428,6 +1460,7 @@ class Hla(HighLevelAnalyzer):
         0x0125: ResponseGetChipEui,
         0x0126: ResponseGetSemtechJoinEui,
         0x0127: ResponseDeriveRootKeysAndGetPin,
+        0x8004: ResponseGetHash,
         0x800b: ResponseGetPin,
         0x800c: ResponseReadChipEui,
         0x800d: ResponseReadJoinEui,
@@ -1441,6 +1474,12 @@ class Hla(HighLevelAnalyzer):
         0x0230: ResponseGetLoRaRxHeaderInfos,
     }
 
+    # which firmware the LR11xx is running: transceiver responses lead with stat1,
+    # modem-e responses lead with an RC byte and end with a CRC (Modem-E RM Table 2-4).
+    # 'auto' assumes transceiver until modem-e traffic (0x06xx command or a valid
+    # RC read-back) is seen on the wire.
+    firmware = ChoicesSetting(choices=('auto', 'modem-e', 'transceiver'))
+
     result_types = {
         'mytype': {
             'format': 'Output type: {{type}}, Input type: {{data.input_type}}'
@@ -1448,11 +1487,40 @@ class Hla(HighLevelAnalyzer):
         'match': { 'format': '{{data.string}}'}
     }
 
+    def __new__(cls, settings=None, *args, **kwargs):
+        # analyzer instances saved before the 'firmware' setting existed have no value
+        # for it, and Saleae's validation rejects any missing setting -- supply the
+        # default so those instances keep loading
+        if isinstance(settings, dict) and 'firmware' not in settings:
+            settings = dict(settings, firmware='auto')
+        try:
+            return super().__new__(cls, settings, *args, **kwargs)
+        except TypeError:
+            # standalone harness whose HighLevelAnalyzer base has no settings machinery
+            return super().__new__(cls)
+
     def __init__(self):
         self.idx = 0
         self.pt = PacketType.NONE
         self.cmd_direct_read = 0
         self.next_transfer_response = 0
+        self.modem_e_rc_pending = 0  # a modem-e write command was sent; expect a 2-byte RC read-back
+        self.modem_e_seen = 0        # any modem-e traffic decoded yet in this capture
+
+    def firmware_mode(self):
+        fw = getattr(self, 'firmware', None)
+        if not isinstance(fw, str):
+            # standalone harness: no Saleae settings dialog, allow env override
+            fw = os.environ.get('LR11XX_FIRMWARE', 'auto')
+        return fw
+
+    def modem_e_active(self):
+        fw = self.firmware_mode()
+        if fw == 'modem-e':
+            return True
+        if fw == 'transceiver':
+            return False
+        return self.modem_e_seen != 0
 
     def decode(self, frame: AnalyzerFrame):
         if frame.type == 'result':
@@ -1471,15 +1539,42 @@ class Hla(HighLevelAnalyzer):
         elif frame.type == 'disable':   # rising edge of nSS
             self.idx = -1
             if len(self.ba_mosi) > 0:
-                if self.cmd_direct_read == 0:
+                modem_e_frame = False  # modem-e MISO[0] is an RC byte, not stat1
+                rc_pending = self.modem_e_rc_pending
+                self.modem_e_rc_pending = 0
+                if (self.cmd_direct_read >> 16) == 0x06 and self.ba_mosi[0] == 0x06:
+                    # expected a modem-e response but this is a command frame (retry); decode it as a command
+                    self.cmd_direct_read = 0
+                if (self.firmware_mode() != 'transceiver'
+                        and len(self.ba_mosi) == 2 and self.ba_mosi[0] == 0 and self.ba_mosi[1] == 0
+                        and self.cmd_direct_read == 0
+                        and (rc_pending or self.modem_e_active() or modem_e_rc_crc_ok(self.ba_miso))):
+                    # 2 dummy bytes clocked after a modem-e write command: MISO = [RC, CRC]
+                    my_str = modem_e_rc_readback(self)
+                    self.modem_e_seen = 1
+                    modem_e_frame = True
+                elif self.cmd_direct_read == 0:
                     try:
                         cmd = int.from_bytes(bytearray(self.ba_mosi[0:2]), 'big')
                         if self.ba_mosi[0] == 0x04:
                             my_str = lr_gnss.cmdDict[cmd](self)
                         elif self.ba_mosi[0] == 0x03:
                             my_str = lr_wifi.cmdDict[cmd](self)
+                        elif self.ba_mosi[0] == 0x06:
+                            # modem-e group commands have a 3-byte header: group(2) + cmd(1)
+                            cmd = int.from_bytes(bytearray(self.ba_mosi[0:3]), 'big')
+                            self.modem_e_seen = 1
+                            my_str = lr_modem_e.cmdDict[cmd](self)
+                            if self.next_transfer_response == 0 and cmd != 0x060100:
+                                # write commands get a 2-byte RC read-back (FactoryReset is write_without_rc)
+                                self.modem_e_rc_pending = 1
                         else:
                             my_str = self.cmdDict[cmd](self)
+                        if self.modem_e_active():
+                            # modem-e commands (all groups) carry a trailing CRC; MISO during a command isn't stat1
+                            modem_e_frame = True
+                            if len(self.ba_mosi) >= 3 and self.ba_mosi[-1] != modem_e_crc8(0xFF, self.ba_mosi[0:-1]):
+                                my_str = my_str + ' [cmd crc BAD]'
                         if self.next_transfer_response == 1:
                             self.cmd_direct_read = cmd  # save it for later
                             self.next_transfer_response = 0
@@ -1487,7 +1582,11 @@ class Hla(HighLevelAnalyzer):
                     except Exception as error:
                         if self.ba_mosi[0] == 0:
                             xferLen = len(self.ba_mosi)
-                            if xferLen > 2:
+                            if self.modem_e_active() and xferLen > 2:
+                                # modem-e response framing, but its command wasn't decoded
+                                modem_e_frame = True
+                                my_str = modem_e_orphan_read(self)
+                            elif xferLen > 2:
                                 my_str = self.parseIrqs(int.from_bytes(bytearray(self.ba_miso[2:6]), 'big'))
                             else:
                                 my_str = type(self.ba_mosi).__name__ + ' xferLen' + str(len(self.ba_mosi)) + ', ' + str(frame.end_time - self.nss_fall_time)
@@ -1496,10 +1595,22 @@ class Hla(HighLevelAnalyzer):
                     half_status = 0
                 else:
                     try:
-                        if (self.cmd_direct_read >> 8) == 0x04:
+                        if (self.cmd_direct_read >> 16) == 0x06:
+                            modem_e_frame = True
+                            my_str = lr_modem_e.cmdResponseDict[self.cmd_direct_read](self) + modem_e_resp_crc_note(self)
+                        elif (self.cmd_direct_read >> 8) == 0x04:
                             my_str = lr_gnss.cmdResponseDict[self.cmd_direct_read](self)
                         elif (self.cmd_direct_read >> 8) == 0x03:
                             my_str = lr_wifi.cmdResponseDict[self.cmd_direct_read](self)
+                        elif self.modem_e_active():
+                            # modem-e firmware: system/radio responses are [RC, payload, CRC] too, not [stat1, data]
+                            modem_e_frame = True
+                            handler = self.cmdResponseDict[self.cmd_direct_read]
+                            if self.ba_miso[0] != 0 and modem_e_rc_crc_ok(self.ba_miso):
+                                # error frame: [RC, CRC] only, no payload follows
+                                my_str = handler.__name__.replace('Response', '', 1) + ' RC=' + modem_e_rc_dict.get(self.ba_miso[0], hex(self.ba_miso[0]) + '?')
+                            else:
+                                my_str = handler(self) + modem_e_resp_crc_note(self)
                         else:
                             my_str = self.cmdResponseDict[self.cmd_direct_read](self)
                     except Exception as error:
@@ -1508,7 +1619,7 @@ class Hla(HighLevelAnalyzer):
                     half_status = 1
                     self.cmd_direct_read = 0
 
-                if len(self.ba_mosi) > 1:
+                if len(self.ba_mosi) > 1 and not modem_e_frame:
                     my_str = my_str + ' (' + self.parseStatus(half_status) + ')'
                 #print('--> ', my_str)
             else:
